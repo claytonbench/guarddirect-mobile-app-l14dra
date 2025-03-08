@@ -1,0 +1,133 @@
+name: Backend Build
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/backend/**'
+      - '.github/workflows/backend-build.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/backend/**'
+  workflow_dispatch: # Manual trigger
+
+env:
+  DOTNET_VERSION: 8.0.x
+  BUILD_CONFIGURATION: Release
+  CODE_COVERAGE_THRESHOLD: 80
+  DOCKER_IMAGE_NAME: securitypatrol-api
+
+jobs:
+  build:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      
+      - name: Cache NuGet packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
+          restore-keys: ${{ runner.os }}-nuget-
+      
+      - name: Restore dependencies
+        run: dotnet restore src/backend/SecurityPatrol.sln
+      
+      - name: Build backend solution
+        run: dotnet build src/backend/SecurityPatrol.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+      
+      - name: Publish API project
+        run: dotnet publish src/backend/SecurityPatrol.API/SecurityPatrol.API.csproj --configuration ${{ env.BUILD_CONFIGURATION }} --no-build --output ./publish
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-build
+          path: ./publish
+          retention-days: 7
+
+  test:
+    name: Test Backend
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      
+      - name: Restore dependencies
+        run: dotnet restore src/backend/SecurityPatrol.sln
+      
+      - name: Run unit tests with coverage
+        run: dotnet test src/backend/SecurityPatrol.UnitTests/SecurityPatrol.UnitTests.csproj --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore --collect:"XPlat Code Coverage" --results-directory ./TestResults/UnitTests
+      
+      - name: Run integration tests with coverage
+        run: dotnet test src/backend/SecurityPatrol.IntegrationTests/SecurityPatrol.IntegrationTests.csproj --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore --collect:"XPlat Code Coverage" --results-directory ./TestResults/IntegrationTests
+      
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+      
+      - name: Generate coverage report
+        run: reportgenerator -reports:./TestResults/**/coverage.cobertura.xml -targetdir:./CodeCoverage -reporttypes:Html;Cobertura
+      
+      - name: Verify coverage threshold
+        run: bash -c "if [[ \$(grep -o 'line-rate=\"[0-9]\+\.[0-9]\+\"' ./CodeCoverage/Cobertura.xml | grep -o '[0-9]\+\.[0-9]\+' | head -1) < $(echo ${{ env.CODE_COVERAGE_THRESHOLD }} | awk '{print $1/100}') ]]; then echo \"Code coverage is below threshold of ${{ env.CODE_COVERAGE_THRESHOLD }}%\" && exit 1; fi"
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: ./TestResults
+          retention-days: 7
+      
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage
+          path: ./CodeCoverage
+          retention-days: 7
+
+  container:
+    name: Build Container
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-build
+          path: ./publish
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./src/backend/Dockerfile
+          push: false
+          tags: ${{ env.DOCKER_IMAGE_NAME }}:${{ github.sha }},${{ env.DOCKER_IMAGE_NAME }}:latest
+          outputs: type=docker,dest=./docker-image.tar
+      
+      - name: Upload Docker image as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: docker-image
+          path: ./docker-image.tar
+          retention-days: 7
