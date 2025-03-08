@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "staging"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "resourceGroupName": {
+      "value": "rg-security-patrol-staging"
+    },
+    "appServiceSku": {
+      "value": {
+        "name": "S1",
+        "tier": "Standard",
+        "size": "S1",
+        "family": "S",
+        "capacity": 2
+      }
+    },
+    "sqlDatabaseSku": {
+      "value": "S2"
+    },
+    "storageAccountTier": {
+      "value": "Standard"
+    },
+    "enableReplication": {
+      "value": true
+    },
+    "secondaryLocation": {
+      "value": "westus"
+    },
+    "appInsightsRetentionDays": {
+      "value": 90
+    },
+    "logAnalyticsRetentionDays": {
+      "value": 60
+    },
+    "apiResponseTimeThresholdMs": {
+      "value": 800
+    },
+    "apiFailureRateThreshold": {
+      "value": 3
+    },
+    "alertEmailAddresses": {
+      "value": [
+        "devops@example.com",
+        "securityteam@example.com"
+      ]
+    },
+    "tags": {
+      "value": {
+        "Application": "SecurityPatrol",
+        "Environment": "Staging",
+        "CostCenter": "IT-Security",
+        "ManagedBy": "DevOps",
+        "Criticality": "Medium"
+      }
+    }
+  }
+}
