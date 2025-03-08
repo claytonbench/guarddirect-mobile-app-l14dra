@@ -1,0 +1,125 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "resourceGroupName": {
+      "value": "rg-security-patrol-staging"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "secondaryLocation": {
+      "value": "westus"
+    },
+    "environment": {
+      "value": "staging"
+    },
+    "appServicePlanName": {
+      "value": "asp-security-patrol-staging"
+    },
+    "appServiceName": {
+      "value": "app-security-patrol-staging"
+    },
+    "appServiceSku": {
+      "value": {
+        "name": "S1",
+        "tier": "Standard",
+        "size": "S1",
+        "family": "S",
+        "capacity": 2
+      }
+    },
+    "keyVaultName": {
+      "value": "kv-security-patrol-staging"
+    },
+    "keyVaultResourceGroupName": {
+      "value": "rg-security-patrol-staging"
+    },
+    "appInsightsName": {
+      "value": "ai-security-patrol-staging"
+    },
+    "appInsightsResourceGroupName": {
+      "value": "rg-security-patrol-staging"
+    },
+    "logAnalyticsWorkspaceName": {
+      "value": "law-security-patrol-staging"
+    },
+    "logAnalyticsWorkspaceResourceGroupName": {
+      "value": "rg-security-patrol-staging"
+    },
+    "sqlServerName": {
+      "value": "sql-security-patrol-staging"
+    },
+    "sqlDatabaseName": {
+      "value": "SecurityPatrolDb"
+    },
+    "sqlDatabaseSku": {
+      "value": "S2"
+    },
+    "sqlAdminLogin": {
+      "value": "sqladmin"
+    },
+    "sqlAdminPassword": {
+      "value": null
+    },
+    "storageAccountName": {
+      "value": "stsecuritypatrolstaging"
+    },
+    "storageAccountSku": {
+      "value": "Standard_GRS"
+    },
+    "enableGeoReplication": {
+      "value": true
+    },
+    "enableAdvancedThreatProtection": {
+      "value": true
+    },
+    "enableAuditing": {
+      "value": true
+    },
+    "enableAutoScale": {
+      "value": true
+    },
+    "minCapacity": {
+      "value": 2
+    },
+    "maxCapacity": {
+      "value": 5
+    },
+    "cpuPercentageThreshold": {
+      "value": 60
+    },
+    "appInsightsRetentionDays": {
+      "value": 90
+    },
+    "logAnalyticsRetentionDays": {
+      "value": 60
+    },
+    "actionGroupName": {
+      "value": "ag-security-patrol-staging"
+    },
+    "alertEmailAddresses": {
+      "value": [
+        "devops@example.com",
+        "securityteam@example.com"
+      ]
+    },
+    "dashboardName": {
+      "value": "dashboard-security-patrol-staging"
+    },
+    "apiResponseTimeThresholdMs": {
+      "value": 800
+    },
+    "apiFailureRateThreshold": {
+      "value": 3
+    },
+    "tags": {
+      "value": {
+        "Application": "SecurityPatrol",
+        "Environment": "Staging",
+        "CostCenter": "IT-Security",
+        "ManagedBy": "DevOps"
+      }
+    }
+  }
+}
