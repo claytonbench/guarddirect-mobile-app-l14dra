@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/DotNetAnalyzers/StyleCopAnalyzers/master/StyleCop.Analyzers/StyleCop.Analyzers/Settings/stylecop.schema.json",
+  "settings": {
+    "documentationRules": {
+      "companyName": "Security Patrol",
+      "copyrightText": "Copyright (c) {companyName}. All rights reserved.",
+      "xmlHeader": true,
+      "headerDecoration": "-----------------------------------------------------------------------",
+      "documentInterfaces": true,
+      "documentInternalElements": false,
+      "documentPrivateElements": false,
+      "documentPrivateFields": false,
+      "documentExposedElements": true,
+      "fileNamingConvention": "stylecop"
+    },
+    "layoutRules": {
+      "newlineAtEndOfFile": "require",
+      "allowConsecutiveUsings": true,
+      "allowDoWhileOnClosingBrace": true
+    },
+    "indentation": {
+      "indentationSize": 4,
+      "tabSize": 4,
+      "useTabs": false
+    },
+    "namingRules": {
+      "allowCommonHungarianPrefixes": true,
+      "allowedHungarianPrefixes": ["db", "at", "or", "up", "it", "un", "x", "y", "id", "ip", "ui"],
+      "includeInferredTupleElementNames": true,
+      "tupleElementNameCasing": "camelCase"
+    },
+    "maintainabilityRules": {
+      "topLevelTypes": ["class", "interface", "struct", "enum"]
+    },
+    "orderingRules": {
+      "usingDirectivesPlacement": "outsideNamespace",
+      "systemUsingDirectivesFirst": true,
+      "blankLinesBetweenUsingGroups": "allow",
+      "elementOrder": ["kind", "accessibility", "constant", "static", "readonly"]
+    },
+    "readabilityRules": {
+      "allowBuiltInTypeAliases": false
+    },
+    "spacingRules": {
+      "allowDoubleSemicolonAtEndOfLine": false
+    }
+  }
+}
