@@ -1,0 +1,435 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "resourceGroupName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the resource group where resources will be deployed"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Primary location for all resources"
+            }
+        },
+        "environment": {
+            "type": "string",
+            "allowedValues": [
+                "dev",
+                "staging",
+                "prod"
+            ],
+            "metadata": {
+                "description": "Deployment environment (dev, staging, prod)"
+            }
+        },
+        "appServicePlanName": {
+            "type": "string",
+            "defaultValue": "[concat('asp-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the App Service Plan"
+            }
+        },
+        "appServiceName": {
+            "type": "string",
+            "defaultValue": "[concat('app-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the App Service"
+            }
+        },
+        "appServiceSku": {
+            "type": "object",
+            "defaultValue": {
+                "name": "S1",
+                "tier": "Standard",
+                "size": "S1",
+                "family": "S",
+                "capacity": 2
+            },
+            "metadata": {
+                "description": "The SKU of the App Service Plan"
+            }
+        },
+        "keyVaultName": {
+            "type": "string",
+            "defaultValue": "[concat('kv-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Key Vault to store secrets"
+            }
+        },
+        "keyVaultResourceGroupName": {
+            "type": "string",
+            "defaultValue": "[parameters('resourceGroupName')]",
+            "metadata": {
+                "description": "Resource group containing the Key Vault"
+            }
+        },
+        "appInsightsName": {
+            "type": "string",
+            "defaultValue": "[concat('ai-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Application Insights instance"
+            }
+        },
+        "appInsightsResourceGroupName": {
+            "type": "string",
+            "defaultValue": "[parameters('resourceGroupName')]",
+            "metadata": {
+                "description": "Resource group containing the Application Insights instance"
+            }
+        },
+        "sqlConnectionStringSecretName": {
+            "type": "string",
+            "defaultValue": "SqlConnectionString",
+            "metadata": {
+                "description": "Name of the Key Vault secret containing the SQL connection string"
+            }
+        },
+        "enableAutoScale": {
+            "type": "bool",
+            "defaultValue": "[equals(parameters('environment'), 'prod')]",
+            "metadata": {
+                "description": "Enable auto-scaling for the App Service Plan"
+            }
+        },
+        "minCapacity": {
+            "type": "int",
+            "defaultValue": "[parameters('appServiceSku').capacity]",
+            "metadata": {
+                "description": "Minimum number of instances for auto-scaling"
+            }
+        },
+        "maxCapacity": {
+            "type": "int",
+            "defaultValue": 10,
+            "metadata": {
+                "description": "Maximum number of instances for auto-scaling"
+            }
+        },
+        "cpuPercentageThreshold": {
+            "type": "int",
+            "defaultValue": 60,
+            "metadata": {
+                "description": "CPU percentage threshold for scaling out"
+            }
+        },
+        "tags": {
+            "type": "object",
+            "defaultValue": {
+                "Application": "SecurityPatrol",
+                "Environment": "[parameters('environment')]"
+            },
+            "metadata": {
+                "description": "Tags to apply to resources"
+            }
+        }
+    },
+    "variables": {
+        "keyVaultId": "[resourceId(parameters('keyVaultResourceGroupName'), 'Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "appInsightsId": "[resourceId(parameters('appInsightsResourceGroupName'), 'Microsoft.Insights/components', parameters('appInsightsName'))]",
+        "stagingSlotName": "staging",
+        "autoscaleSettingName": "[concat('as-', parameters('appServicePlanName'))]",
+        "sqlConnectionStringReference": "[concat('@Microsoft.KeyVault(SecretUri=', reference(resourceId(parameters('keyVaultResourceGroupName'), 'Microsoft.KeyVault/vaults/secrets', parameters('keyVaultName'), parameters('sqlConnectionStringSecretName'))).secretUriWithVersion, ')')]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "apiVersion": "2021-03-01",
+            "name": "[parameters('appServicePlanName')]",
+            "location": "[parameters('location')]",
+            "kind": "linux",
+            "properties": {
+                "reserved": true
+            },
+            "sku": {
+                "name": "[parameters('appServiceSku').name]",
+                "tier": "[parameters('appServiceSku').tier]",
+                "size": "[parameters('appServiceSku').size]",
+                "family": "[parameters('appServiceSku').family]",
+                "capacity": "[parameters('appServiceSku').capacity]"
+            },
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Web/sites",
+            "apiVersion": "2021-03-01",
+            "name": "[parameters('appServiceName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
+            ],
+            "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                "httpsOnly": true,
+                "clientAffinityEnabled": false,
+                "siteConfig": {
+                    "alwaysOn": true,
+                    "linuxFxVersion": "DOTNETCORE|8.0",
+                    "minTlsVersion": "1.2",
+                    "http20Enabled": true,
+                    "cors": {
+                        "allowedOrigins": [
+                            "*"
+                        ],
+                        "supportCredentials": true
+                    },
+                    "healthCheckPath": "/health",
+                    "appSettings": [
+                        {
+                            "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+                            "value": "[reference(variables('appInsightsId'), '2020-02-02').InstrumentationKey]"
+                        },
+                        {
+                            "name": "ASPNETCORE_ENVIRONMENT",
+                            "value": "[if(equals(parameters('environment'), 'prod'), 'Production', if(equals(parameters('environment'), 'staging'), 'Staging', 'Development'))]"
+                        },
+                        {
+                            "name": "WEBSITE_RUN_FROM_PACKAGE",
+                            "value": "1"
+                        },
+                        {
+                            "name": "WEBSITE_TIME_ZONE",
+                            "value": "UTC"
+                        },
+                        {
+                            "name": "ConnectionStrings__DefaultConnection",
+                            "value": "[variables('sqlConnectionStringReference')]"
+                        },
+                        {
+                            "name": "Authentication__TokenSecret",
+                            "value": "@Microsoft.KeyVault(SecretUri=https://[parameters('keyVaultName')].vault.azure.net/secrets/TokenSecret/)"
+                        },
+                        {
+                            "name": "Authentication__TokenExpirationHours",
+                            "value": "8"
+                        },
+                        {
+                            "name": "Storage__ConnectionString",
+                            "value": "@Microsoft.KeyVault(SecretUri=https://[parameters('keyVaultName')].vault.azure.net/secrets/StorageConnectionString/)"
+                        },
+                        {
+                            "name": "SmsService__ApiKey",
+                            "value": "@Microsoft.KeyVault(SecretUri=https://[parameters('keyVaultName')].vault.azure.net/secrets/SmsApiKey/)"
+                        }
+                    ]
+                }
+            },
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Web/sites/slots",
+            "apiVersion": "2021-03-01",
+            "name": "[concat(parameters('appServiceName'), '/', variables('stagingSlotName'))]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('appServiceName'))]"
+            ],
+            "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                "httpsOnly": true,
+                "clientAffinityEnabled": false,
+                "siteConfig": {
+                    "alwaysOn": true,
+                    "linuxFxVersion": "DOTNETCORE|8.0",
+                    "minTlsVersion": "1.2",
+                    "http20Enabled": true,
+                    "cors": {
+                        "allowedOrigins": [
+                            "*"
+                        ],
+                        "supportCredentials": true
+                    },
+                    "healthCheckPath": "/health",
+                    "appSettings": [
+                        {
+                            "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+                            "value": "[reference(variables('appInsightsId'), '2020-02-02').InstrumentationKey]"
+                        },
+                        {
+                            "name": "ASPNETCORE_ENVIRONMENT",
+                            "value": "Staging"
+                        },
+                        {
+                            "name": "WEBSITE_RUN_FROM_PACKAGE",
+                            "value": "1"
+                        },
+                        {
+                            "name": "WEBSITE_TIME_ZONE",
+                            "value": "UTC"
+                        },
+                        {
+                            "name": "ConnectionStrings__DefaultConnection",
+                            "value": "[variables('sqlConnectionStringReference')]"
+                        },
+                        {
+                            "name": "Authentication__TokenSecret",
+                            "value": "@Microsoft.KeyVault(SecretUri=https://[parameters('keyVaultName')].vault.azure.net/secrets/TokenSecret/)"
+                        },
+                        {
+                            "name": "Authentication__TokenExpirationHours",
+                            "value": "8"
+                        },
+                        {
+                            "name": "Storage__ConnectionString",
+                            "value": "@Microsoft.KeyVault(SecretUri=https://[parameters('keyVaultName')].vault.azure.net/secrets/StorageConnectionString/)"
+                        },
+                        {
+                            "name": "SmsService__ApiKey",
+                            "value": "@Microsoft.KeyVault(SecretUri=https://[parameters('keyVaultName')].vault.azure.net/secrets/SmsApiKey/)"
+                        }
+                    ]
+                }
+            },
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults/accessPolicies",
+            "apiVersion": "2021-11-01-preview",
+            "name": "[concat(parameters('keyVaultName'), '/add')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', parameters('appServiceName'))]"
+            ],
+            "properties": {
+                "accessPolicies": [
+                    {
+                        "tenantId": "[subscription().tenantId]",
+                        "objectId": "[reference(resourceId('Microsoft.Web/sites', parameters('appServiceName')), '2021-03-01', 'Full').identity.principalId]",
+                        "permissions": {
+                            "secrets": [
+                                "get",
+                                "list"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults/accessPolicies",
+            "apiVersion": "2021-11-01-preview",
+            "name": "[concat(parameters('keyVaultName'), '/add')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/sites/slots', parameters('appServiceName'), variables('stagingSlotName'))]",
+                "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('keyVaultName'), 'add')]"
+            ],
+            "properties": {
+                "accessPolicies": [
+                    {
+                        "tenantId": "[subscription().tenantId]",
+                        "objectId": "[reference(resourceId('Microsoft.Web/sites/slots', parameters('appServiceName'), variables('stagingSlotName')), '2021-03-01', 'Full').identity.principalId]",
+                        "permissions": {
+                            "secrets": [
+                                "get",
+                                "list"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "condition": "[parameters('enableAutoScale')]",
+            "type": "Microsoft.Insights/autoscalesettings",
+            "apiVersion": "2021-05-01-preview",
+            "name": "[variables('autoscaleSettingName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]"
+            ],
+            "properties": {
+                "name": "[variables('autoscaleSettingName')]",
+                "targetResourceUri": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                "enabled": true,
+                "profiles": [
+                    {
+                        "name": "Default",
+                        "capacity": {
+                            "minimum": "[parameters('minCapacity')]",
+                            "maximum": "[parameters('maxCapacity')]",
+                            "default": "[parameters('minCapacity')]"
+                        },
+                        "rules": [
+                            {
+                                "metricTrigger": {
+                                    "metricName": "CpuPercentage",
+                                    "metricResourceUri": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT10M",
+                                    "timeAggregation": "Average",
+                                    "operator": "GreaterThan",
+                                    "threshold": "[parameters('cpuPercentageThreshold')]"
+                                },
+                                "scaleAction": {
+                                    "direction": "Increase",
+                                    "type": "ChangeCount",
+                                    "value": 1,
+                                    "cooldown": "PT10M"
+                                }
+                            },
+                            {
+                                "metricTrigger": {
+                                    "metricName": "CpuPercentage",
+                                    "metricResourceUri": "[resourceId('Microsoft.Web/serverfarms', parameters('appServicePlanName'))]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT10M",
+                                    "timeAggregation": "Average",
+                                    "operator": "LessThan",
+                                    "threshold": 30
+                                },
+                                "scaleAction": {
+                                    "direction": "Decrease",
+                                    "type": "ChangeCount",
+                                    "value": 1,
+                                    "cooldown": "PT10M"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "notifications": [
+                    {
+                        "email": {
+                            "sendToSubscriptionAdministrator": true,
+                            "sendToSubscriptionCoAdministrators": true,
+                            "customEmails": []
+                        }
+                    }
+                ]
+            },
+            "tags": "[parameters('tags')]"
+        }
+    ],
+    "outputs": {
+        "appServiceName": {
+            "type": "string",
+            "value": "[parameters('appServiceName')]"
+        },
+        "appServiceUrl": {
+            "type": "string",
+            "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', parameters('appServiceName'))).defaultHostName)]"
+        },
+        "appServiceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Web/sites', parameters('appServiceName'))]"
+        },
+        "stagingSlotName": {
+            "type": "string",
+            "value": "[variables('stagingSlotName')]"
+        },
+        "stagingSlotUrl": {
+            "type": "string",
+            "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites/slots', parameters('appServiceName'), variables('stagingSlotName'))).defaultHostName)]"
+        }
+    }
+}
