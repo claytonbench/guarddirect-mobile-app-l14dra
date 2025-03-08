@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "5000:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=db;Database=SecurityPatrol;User Id=sa;Password=${DB_PASSWORD};TrustServerCertificate=True;
+      - JWT__SecretKey=${JWT_SECRET_KEY}
+      - JWT__Issuer=SecurityPatrol.API.Development
+      - JWT__Audience=SecurityPatrol.Client.Development
+      - JWT__TokenExpirationHours=24
+      - SmsService__ApiKey=${SMS_API_KEY}
+      - Storage__BasePath=/app/storage
+      - FeatureManagement__DetailedErrorMessages=true
+      - FeatureManagement__EnableSwagger=true
+      - Security__RequireHttps=false
+    volumes:
+      - ./:/app
+      - ./storage:/app/storage
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - securitypatrol-network
+
+  db:
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=${DB_PASSWORD}
+      - MSSQL_PID=Express
+    volumes:
+      - sqldata:/var/opt/mssql
+    restart: unless-stopped
+    networks:
+      - securitypatrol-network
+
+volumes:
+  sqldata:
+
+networks:
+  securitypatrol-network:
