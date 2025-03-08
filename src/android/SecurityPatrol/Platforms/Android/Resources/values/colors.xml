@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Map the application's color scheme to Android-specific resource identifiers -->
+    <!-- These colors are referenced from AppColors.xaml in the shared resources -->
+    <color name="colorPrimary">#2B60DE</color>        <!-- Deep Blue - Maps to PrimaryColor -->
+    <color name="colorPrimaryDark">#1E3F8A</color>    <!-- Darker Blue - Maps to PrimaryDarkColor -->
+    <color name="colorAccent">#F18F01</color>         <!-- Orange - Maps to AccentColor -->
+    <color name="colorPrimaryLight">#9CB7E3</color>   <!-- Light Blue - Maps to PrimaryLightColor -->
+    <color name="windowBackground">#F5F7FA</color>    <!-- Off-White - Maps to BackgroundColor -->
+    
+    <!-- Android system UI colors -->
+    <color name="navigationBarColor">#1E3F8A</color>  <!-- Use PrimaryDarkColor for navigation bar -->
+    <color name="statusBarColor">#1E3F8A</color>      <!-- Use PrimaryDarkColor for status bar -->
+    
+    <!-- Splash screen colors -->
+    <color name="splashScreenBackground">#F5F7FA</color> <!-- Use BackgroundColor for splash screen -->
+    <color name="maui_splash_color">#F5F7FA</color>      <!-- Color used by MAUI splash screen implementation -->
+</resources>
