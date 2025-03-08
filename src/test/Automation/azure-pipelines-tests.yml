@@ -1,0 +1,496 @@
+# Pipeline configuration for Security Patrol tests
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+    - feature/*
+    exclude:
+    - docs/*
+  paths:
+    include:
+    - src/**
+    exclude:
+    - docs/**
+    - '*.md'
+
+pr:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    include:
+    - src/**
+    exclude:
+    - docs/**
+    - '*.md'
+
+schedules:
+- cron: '0 0 * * *'
+  displayName: Daily midnight build
+  branches:
+    include:
+    - main
+    - develop
+  always: false
+
+parameters:
+  - name: runApiTests
+    displayName: Run API Tests
+    type: boolean
+    default: true
+  - name: runMauiTests
+    displayName: Run MAUI Tests
+    type: boolean
+    default: true
+  - name: runSpecializedTests
+    displayName: Run Specialized Tests
+    type: boolean
+    default: true
+  - name: runE2ETests
+    displayName: Run E2E Tests
+    type: boolean
+    default: false
+  - name: buildConfiguration
+    displayName: Build Configuration
+    type: string
+    default: Release
+    values:
+    - Debug
+    - Release
+
+variables:
+  - name: buildConfiguration
+    value: ${{ parameters.buildConfiguration }}
+  - name: testConfiguration
+    value: Debug
+  - name: coverageThreshold
+    value: 80
+  - name: vmImage
+    value: 'windows-latest'
+  - name: dotnetVersion
+    value: '8.0.x'
+
+stages:
+- stage: Build
+  jobs:
+  - job: build_api
+    displayName: Build API
+    condition: eq(${{ parameters.runApiTests }}, true)
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotnetVersion)
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet packages for API solution'
+      inputs:
+        command: 'restore'
+        projects: 'src/backend/SecurityPatrol.API.sln'
+        feedsToUse: 'select'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build API solution'
+      inputs:
+        command: 'build'
+        projects: 'src/backend/SecurityPatrol.API.sln'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish API build artifacts'
+      inputs:
+        targetPath: 'src/backend/SecurityPatrol.API/bin/$(buildConfiguration)/net8.0/publish/'
+        artifact: 'api-build'
+        publishLocation: 'pipeline'
+
+  - job: build_maui
+    displayName: Build MAUI
+    condition: eq(${{ parameters.runMauiTests }}, true)
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotnetVersion)
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    - task: PowerShell@2
+      displayName: 'Install MAUI workload'
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet workload install maui
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet packages for MAUI solution'
+      inputs:
+        command: 'restore'
+        projects: 'src/android/SecurityPatrol.MAUI.sln'
+        feedsToUse: 'select'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build MAUI solution'
+      inputs:
+        command: 'build'
+        projects: 'src/android/SecurityPatrol.MAUI.sln'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish MAUI build artifacts'
+      inputs:
+        targetPath: 'src/android/SecurityPatrol/bin/$(buildConfiguration)/net8.0-android/'
+        artifact: 'maui-build'
+        publishLocation: 'pipeline'
+
+- stage: Test
+  dependsOn: Build
+  condition: succeeded('Build')
+  jobs:
+  - job: test_api
+    displayName: Test API
+    condition: eq(${{ parameters.runApiTests }}, true)
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotnetVersion)
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download API build artifacts'
+      inputs:
+        buildType: 'current'
+        artifactName: 'api-build'
+        targetPath: '$(Pipeline.Workspace)/api-build'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run API unit tests'
+      inputs:
+        command: 'test'
+        projects: 'src/backend/SecurityPatrol.API.UnitTests/SecurityPatrol.API.UnitTests.csproj'
+        arguments: '--configuration $(testConfiguration) --settings $(Build.SourcesDirectory)/src/test/API/SecurityPatrol.API.Tests.runsettings --results-directory $(Build.SourcesDirectory)/TestResults/API/UnitTests --collect "XPlat Code Coverage"'
+        publishTestResults: true
+        testRunTitle: 'API Unit Tests'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run API integration tests'
+      inputs:
+        command: 'test'
+        projects: 'src/backend/SecurityPatrol.API.IntegrationTests/SecurityPatrol.API.IntegrationTests.csproj'
+        arguments: '--configuration $(testConfiguration) --settings $(Build.SourcesDirectory)/src/test/API/SecurityPatrol.API.Tests.runsettings --results-directory $(Build.SourcesDirectory)/TestResults/API/IntegrationTests --collect "XPlat Code Coverage"'
+        publishTestResults: true
+        testRunTitle: 'API Integration Tests'
+
+    - task: PowerShell@2
+      displayName: 'Generate coverage report for API'
+      inputs:
+        filePath: '$(Build.SourcesDirectory)/src/test/Automation/test-report-generator.ps1'
+        arguments: '-CoverageReportPath "$(Build.SourcesDirectory)/TestResults/API/UnitTests/**/coverage.cobertura.xml" -OutputPath "$(Build.SourcesDirectory)/CodeCoverage/API" -TargetDirectory "$(Build.SourcesDirectory)/src/backend"'
+        failOnStderr: true
+
+    - task: PowerShell@2
+      displayName: 'Verify API code coverage meets threshold'
+      inputs:
+        filePath: '$(Build.SourcesDirectory)/src/test/Automation/test-report-generator.ps1'
+        arguments: '-Verify -CoverageReportPath "$(Build.SourcesDirectory)/TestResults/API/UnitTests/**/coverage.cobertura.xml" -Threshold $(coverageThreshold)'
+        failOnStderr: true
+
+    - task: PublishTestResults@2
+      displayName: 'Publish API test results'
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '$(Build.SourcesDirectory)/TestResults/API/**/*.trx'
+        mergeTestResults: true
+        testRunTitle: 'API Tests'
+
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish API code coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(Build.SourcesDirectory)/TestResults/API/UnitTests/**/coverage.cobertura.xml'
+        reportDirectory: '$(Build.SourcesDirectory)/CodeCoverage/API'
+
+  - job: test_maui
+    displayName: Test MAUI
+    condition: eq(${{ parameters.runMauiTests }}, true)
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotnetVersion)
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    - task: PowerShell@2
+      displayName: 'Install MAUI workload'
+      inputs:
+        targetType: 'inline'
+        script: |
+          dotnet workload install maui
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download MAUI build artifacts'
+      inputs:
+        buildType: 'current'
+        artifactName: 'maui-build'
+        targetPath: '$(Pipeline.Workspace)/maui-build'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run MAUI unit tests'
+      inputs:
+        command: 'test'
+        projects: 'src/android/SecurityPatrol.MAUI.UnitTests/SecurityPatrol.MAUI.UnitTests.csproj'
+        arguments: '--configuration $(testConfiguration) --settings $(Build.SourcesDirectory)/src/test/MAUI/SecurityPatrol.MAUI.Tests.runsettings --results-directory $(Build.SourcesDirectory)/TestResults/MAUI/UnitTests --collect "XPlat Code Coverage"'
+        publishTestResults: true
+        testRunTitle: 'MAUI Unit Tests'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run MAUI integration tests'
+      inputs:
+        command: 'test'
+        projects: 'src/android/SecurityPatrol.MAUI.IntegrationTests/SecurityPatrol.MAUI.IntegrationTests.csproj'
+        arguments: '--configuration $(testConfiguration) --settings $(Build.SourcesDirectory)/src/test/MAUI/SecurityPatrol.MAUI.Tests.runsettings --results-directory $(Build.SourcesDirectory)/TestResults/MAUI/IntegrationTests --collect "XPlat Code Coverage"'
+        publishTestResults: true
+        testRunTitle: 'MAUI Integration Tests'
+
+    - task: PowerShell@2
+      displayName: 'Generate coverage report for MAUI'
+      inputs:
+        filePath: '$(Build.SourcesDirectory)/src/test/Automation/test-report-generator.ps1'
+        arguments: '-CoverageReportPath "$(Build.SourcesDirectory)/TestResults/MAUI/UnitTests/**/coverage.cobertura.xml" -OutputPath "$(Build.SourcesDirectory)/CodeCoverage/MAUI" -TargetDirectory "$(Build.SourcesDirectory)/src/android"'
+        failOnStderr: true
+
+    - task: PowerShell@2
+      displayName: 'Verify MAUI code coverage meets threshold'
+      inputs:
+        filePath: '$(Build.SourcesDirectory)/src/test/Automation/test-report-generator.ps1'
+        arguments: '-Verify -CoverageReportPath "$(Build.SourcesDirectory)/TestResults/MAUI/UnitTests/**/coverage.cobertura.xml" -Threshold $(coverageThreshold)'
+        failOnStderr: true
+
+    - task: PublishTestResults@2
+      displayName: 'Publish MAUI test results'
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '$(Build.SourcesDirectory)/TestResults/MAUI/**/*.trx'
+        mergeTestResults: true
+        testRunTitle: 'MAUI Tests'
+
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish MAUI code coverage'
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(Build.SourcesDirectory)/TestResults/MAUI/UnitTests/**/coverage.cobertura.xml'
+        reportDirectory: '$(Build.SourcesDirectory)/CodeCoverage/MAUI'
+
+  - job: specialized_tests
+    displayName: Specialized Tests
+    condition: eq(${{ parameters.runSpecializedTests }}, true)
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotnetVersion)
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    - task: DownloadPipelineArtifact@2
+      displayName: 'Download build artifacts'
+      inputs:
+        buildType: 'current'
+        artifactName: 'api-build'
+        targetPath: '$(Pipeline.Workspace)/api-build'
+
+    - task: PowerShell@2
+      displayName: 'Run security tests (Windows)'
+      condition: eq(variables['Agent.OS'], 'Windows_NT')
+      inputs:
+        filePath: '$(Build.SourcesDirectory)/src/test/Automation/build-and-test.ps1'
+        arguments: '-s -c $(testConfiguration) -o "$(Build.SourcesDirectory)/TestResults"'
+        failOnStderr: true
+
+    - task: Bash@3
+      displayName: 'Run security tests (Linux/macOS)'
+      condition: ne(variables['Agent.OS'], 'Windows_NT')
+      inputs:
+        filePath: '$(Build.SourcesDirectory)/src/test/Automation/build-and-test.sh'
+        arguments: '--specialized-tests -c $(testConfiguration) -o "$(Build.SourcesDirectory)/TestResults"'
+        failOnStderr: true
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run vulnerability scan'
+      inputs:
+        command: 'custom'
+        custom: 'list'
+        arguments: 'package --vulnerable --include-transitive'
+        projects: |
+          src/backend/SecurityPatrol.API/SecurityPatrol.API.csproj
+          src/android/SecurityPatrol/SecurityPatrol.csproj
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run API performance tests'
+      inputs:
+        command: 'test'
+        projects: 'src/test/Performance/API/SecurityPatrol.API.PerformanceTests/SecurityPatrol.API.PerformanceTests.csproj'
+        arguments: '--configuration $(testConfiguration) --settings $(Build.SourcesDirectory)/src/test/API/SecurityPatrol.API.Tests.runsettings --results-directory $(Build.SourcesDirectory)/TestResults/Specialized/Performance/API'
+        publishTestResults: true
+        testRunTitle: 'API Performance Tests'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run MAUI performance tests'
+      inputs:
+        command: 'test'
+        projects: 'src/test/Performance/MAUI/SecurityPatrol.MAUI.PerformanceTests/SecurityPatrol.MAUI.PerformanceTests.csproj'
+        arguments: '--configuration $(testConfiguration) --settings $(Build.SourcesDirectory)/src/test/MAUI/SecurityPatrol.MAUI.Tests.runsettings --results-directory $(Build.SourcesDirectory)/TestResults/Specialized/Performance/MAUI'
+        publishTestResults: true
+        testRunTitle: 'MAUI Performance Tests'
+
+    - task: PublishTestResults@2
+      displayName: 'Publish specialized test results'
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '$(Build.SourcesDirectory)/TestResults/Specialized/**/*.trx'
+        mergeTestResults: true
+        testRunTitle: 'Specialized Tests'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish security scan results'
+      condition: always()
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)/TestResults/Specialized'
+        artifact: 'security-scan-results'
+        publishLocation: 'pipeline'
+
+- stage: E2E_Tests
+  dependsOn: Test
+  condition: and(succeeded('Test'), eq(${{ parameters.runE2ETests }}, true))
+  jobs:
+  - job: e2e_tests
+    displayName: End-to-End Tests
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotnetVersion)
+        installationPath: $(Agent.ToolsDirectory)/dotnet
+
+    - task: PowerShell@2
+      displayName: 'Set up E2E test environment (Windows)'
+      condition: eq(variables['Agent.OS'], 'Windows_NT')
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Start API for E2E tests
+          $env:ASPNETCORE_ENVIRONMENT = "Testing"
+          Start-Process -FilePath "dotnet" -ArgumentList "run --project $(Build.SourcesDirectory)/src/backend/SecurityPatrol.API/SecurityPatrol.API.csproj --configuration $(testConfiguration) --no-build" -PassThru
+          
+          # Wait for API to start
+          Start-Sleep -Seconds 10
+
+    - task: Bash@3
+      displayName: 'Set up E2E test environment (Linux/macOS)'
+      condition: ne(variables['Agent.OS'], 'Windows_NT')
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Start API for E2E tests
+          export ASPNETCORE_ENVIRONMENT=Testing
+          dotnet run --project $(Build.SourcesDirectory)/src/backend/SecurityPatrol.API/SecurityPatrol.API.csproj --configuration $(testConfiguration) --no-build &
+          API_PID=$!
+          
+          # Wait for API to start
+          sleep 10
+          
+          # Store PID for later cleanup
+          echo "API_PID=$API_PID" >> $GITHUB_ENV
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run E2E tests'
+      inputs:
+        command: 'test'
+        projects: 'src/test/E2E/SecurityPatrol.E2ETests/SecurityPatrol.E2ETests.csproj'
+        arguments: '--configuration $(testConfiguration) --settings $(Build.SourcesDirectory)/src/test/API/SecurityPatrol.API.Tests.runsettings --results-directory $(Build.SourcesDirectory)/TestResults/E2E'
+        publishTestResults: true
+        testRunTitle: 'E2E Tests'
+
+    - task: PowerShell@2
+      displayName: 'Clean up test environment (Windows)'
+      condition: eq(variables['Agent.OS'], 'Windows_NT')
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Find and stop any running API processes
+          $apiProcess = Get-Process -Name "dotnet" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*SecurityPatrol.API*" }
+          if ($apiProcess) {
+            $apiProcess | Stop-Process -Force
+          }
+
+    - task: Bash@3
+      displayName: 'Clean up test environment (Linux/macOS)'
+      condition: ne(variables['Agent.OS'], 'Windows_NT')
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Kill API process if it's still running
+          if [ ! -z "$API_PID" ]; then
+            kill $API_PID || true
+          fi
+
+    - task: PublishTestResults@2
+      displayName: 'Publish E2E test results'
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '$(Build.SourcesDirectory)/TestResults/E2E/**/*.trx'
+        mergeTestResults: true
+        testRunTitle: 'E2E Tests'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish E2E test results'
+      condition: always()
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)/TestResults/E2E'
+        artifact: 'e2e-test-results'
+        publishLocation: 'pipeline'
+
+- stage: PublishResults
+  dependsOn: [Test, E2E_Tests]
+  condition: always()
+  jobs:
+  - job: combine_results
+    displayName: 'Combine Test Results'
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish all test results'
+      condition: always()
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)/TestResults'
+        artifact: 'test-results'
+        publishLocation: 'pipeline'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish code coverage reports'
+      condition: always()
+      inputs:
+        targetPath: '$(Build.SourcesDirectory)/CodeCoverage'
+        artifact: 'code-coverage'
+        publishLocation: 'pipeline'
