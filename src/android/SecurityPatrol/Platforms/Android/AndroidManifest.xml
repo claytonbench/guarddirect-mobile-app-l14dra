@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.securitypatrol.app"
+    android:versionCode="1"
+    android:versionName="1.0"
+    android:installLocation="auto">
+
+    <!-- Network permissions -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" /> <!-- Required to detect network connectivity status for synchronization -->
+    <uses-permission android:name="android.permission.INTERNET" /> <!-- Required for API communication and data synchronization -->
+
+    <!-- Location permissions -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" /> <!-- Required for precise GPS location tracking -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" /> <!-- Required for approximate location tracking -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" /> <!-- Required for location tracking when app is in background -->
+
+    <!-- Camera and storage permissions -->
+    <uses-permission android:name="android.permission.CAMERA" /> <!-- Required for in-app photo capture -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" /> <!-- Required for reading photos (for Android < 13) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" /> <!-- Required for storing photos (for Android < 13) -->
+
+    <!-- Background processing permissions -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" /> <!-- Required for running location tracking as a foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" /> <!-- Required for using location in a foreground service (Android 14+) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" /> <!-- Required to keep device awake during location tracking -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" /> <!-- Required to request exemption from battery optimization for reliable tracking -->
+
+    <!-- Feature requirements -->
+    <uses-feature android:name="android.hardware.location" android:required="true" /> <!-- Specifies that the app requires location hardware -->
+    <uses-feature android:name="android.hardware.location.gps" android:required="true" /> <!-- Specifies that the app requires GPS hardware -->
+    <uses-feature android:name="android.hardware.location.network" android:required="false" /> <!-- Specifies that network location is not strictly required -->
+    <uses-feature android:name="android.hardware.camera" android:required="true" /> <!-- Specifies that the app requires camera hardware -->
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33" />
+
+    <application
+        android:name=".MainApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/icon"
+        android:roundIcon="@mipmap/icon"
+        android:supportsRtl="true"
+        android:label="Security Patrol"
+        android:theme="@style/Maui.SplashTheme"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Maui.SplashTheme"
+            android:configChanges="screenSize|orientation|uiMode|screenLayout|smallestScreenSize|density"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground service for continuous location tracking -->
+        <service
+            android:name=".LocationForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!-- File provider for secure photo sharing -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Google Maps API key for map display -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="@string/maps_api_key" />
+
+    </application>
+</manifest>
