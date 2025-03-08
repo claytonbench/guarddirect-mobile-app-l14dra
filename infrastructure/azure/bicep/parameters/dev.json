@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "resourceGroupName": {
+      "value": "rg-security-patrol-dev"
+    },
+    "appServiceSku": {
+      "value": {
+        "name": "S1",
+        "tier": "Standard",
+        "size": "S1",
+        "family": "S",
+        "capacity": 1
+      }
+    },
+    "sqlDatabaseSku": {
+      "value": "S1"
+    },
+    "storageAccountTier": {
+      "value": "Standard"
+    },
+    "enableReplication": {
+      "value": false
+    },
+    "secondaryLocation": {
+      "value": "westus"
+    },
+    "appInsightsRetentionDays": {
+      "value": 30
+    },
+    "logAnalyticsRetentionDays": {
+      "value": 30
+    },
+    "apiResponseTimeThresholdMs": {
+      "value": 1000
+    },
+    "apiFailureRateThreshold": {
+      "value": 5
+    },
+    "alertEmailAddresses": {
+      "value": [
+        "devops@example.com"
+      ]
+    },
+    "tags": {
+      "value": {
+        "Application": "SecurityPatrol",
+        "Environment": "Development",
+        "CostCenter": "IT-Security",
+        "ManagedBy": "DevOps"
+      }
+    }
+  }
+}
