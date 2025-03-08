@@ -1,0 +1,231 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-patrol-monitoring
+  namespace: security-patrol
+  labels:
+    app: security-patrol
+    component: monitoring
+  annotations:
+    kubernetes.io/description: "Security Patrol monitoring stack deployment"
+    prometheus.io/scrape: "false"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: security-patrol
+      component: monitoring
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: security-patrol
+        component: monitoring
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v2.40.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9090
+          name: prometheus
+          protocol: TCP
+        args:
+        - --config.file=/etc/prometheus/prometheus.yml
+        - --storage.tsdb.path=/prometheus
+        - --storage.tsdb.retention.time=15d
+        - --web.console.libraries=/usr/share/prometheus/console_libraries
+        - --web.console.templates=/usr/share/prometheus/consoles
+        volumeMounts:
+        - name: prometheus-config
+          mountPath: /etc/prometheus
+        - name: prometheus-rules
+          mountPath: /etc/prometheus/rules
+        - name: prometheus-storage
+          mountPath: /prometheus
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9090
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+      
+      - name: grafana
+        image: grafana/grafana:9.3.2
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: grafana
+          protocol: TCP
+        env:
+        - name: GF_SECURITY_ADMIN_USER
+          valueFrom:
+            secretKeyRef:
+              name: security-patrol-secrets
+              key: grafana-admin-user
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: security-patrol-secrets
+              key: grafana-admin-password
+        - name: GF_INSTALL_PLUGINS
+          value: "grafana-clock-panel,grafana-piechart-panel"
+        - name: GF_PATHS_PROVISIONING
+          value: "/etc/grafana/provisioning"
+        - name: GF_SERVER_ROOT_URL
+          value: "%(protocol)s://%(domain)s/grafana/"
+        volumeMounts:
+        - name: grafana-config
+          mountPath: /etc/grafana/provisioning
+        - name: grafana-storage
+          mountPath: /var/lib/grafana
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "300m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 472
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+      
+      - name: alertmanager
+        image: prom/alertmanager:v0.25.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9093
+          name: alertmanager
+          protocol: TCP
+        args:
+        - --config.file=/etc/alertmanager/alertmanager.yml
+        - --storage.path=/alertmanager
+        env:
+        - name: SMTP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: security-patrol-secrets
+              key: smtp-password
+        volumeMounts:
+        - name: alertmanager-config
+          mountPath: /etc/alertmanager
+        - name: alertmanager-storage
+          mountPath: /alertmanager
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "100m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /-/healthy
+            port: 9093
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9093
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+      
+      volumes:
+      - name: prometheus-config
+        configMap:
+          name: security-patrol-prometheus-config
+          items:
+          - key: prometheus.yml
+            path: prometheus.yml
+      - name: prometheus-rules
+        configMap:
+          name: security-patrol-prometheus-config
+          items:
+          - key: rules/api_alerts.yml
+            path: api_alerts.yml
+          - key: rules/sla_alerts.yml
+            path: sla_alerts.yml
+      - name: alertmanager-config
+        configMap:
+          name: security-patrol-alertmanager-config
+          items:
+          - key: alertmanager.yml
+            path: alertmanager.yml
+      - name: grafana-config
+        configMap:
+          name: security-patrol-grafana-config
+          items:
+          - key: datasources/datasource.yml
+            path: datasources/datasource.yml
+          - key: dashboards/dashboard.yml
+            path: dashboards/dashboard.yml
+          - key: dashboards/executive-dashboard.json
+            path: dashboards/executive-dashboard.json
+          - key: dashboards/technical-dashboard.json
+            path: dashboards/technical-dashboard.json
+          - key: dashboards/operational-dashboard.json
+            path: dashboards/operational-dashboard.json
+      - name: prometheus-storage
+        persistentVolumeClaim:
+          claimName: security-patrol-prometheus-pvc
+      - name: grafana-storage
+        persistentVolumeClaim:
+          claimName: security-patrol-grafana-pvc
+      - name: alertmanager-storage
+        persistentVolumeClaim:
+          claimName: security-patrol-alertmanager-pvc
+      
+      securityContext:
+        fsGroup: 65534
+      terminationGracePeriodSeconds: 60
