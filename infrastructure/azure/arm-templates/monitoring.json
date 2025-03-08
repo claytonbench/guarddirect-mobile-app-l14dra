@@ -1,0 +1,563 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "resourceGroupName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the resource group where resources will be deployed"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Primary location for all resources"
+            }
+        },
+        "environment": {
+            "type": "string",
+            "allowedValues": [
+                "dev",
+                "staging",
+                "prod"
+            ],
+            "metadata": {
+                "description": "Deployment environment (dev, staging, prod)"
+            }
+        },
+        "appServiceId": {
+            "type": "string",
+            "metadata": {
+                "description": "Resource ID of the App Service to monitor"
+            }
+        },
+        "appInsightsName": {
+            "type": "string",
+            "defaultValue": "[concat('ai-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Application Insights resource"
+            }
+        },
+        "logAnalyticsWorkspaceName": {
+            "type": "string",
+            "defaultValue": "[concat('law-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Log Analytics Workspace"
+            }
+        },
+        "actionGroupName": {
+            "type": "string",
+            "defaultValue": "[concat('ag-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Action Group for alerts"
+            }
+        },
+        "alertEmailAddresses": {
+            "type": "array",
+            "defaultValue": ["devops@example.com"],
+            "metadata": {
+                "description": "Email addresses for receiving alerts"
+            }
+        },
+        "dashboardName": {
+            "type": "string",
+            "defaultValue": "[concat('dashboard-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the monitoring dashboard"
+            }
+        },
+        "appInsightsRetentionDays": {
+            "type": "int",
+            "defaultValue": 90,
+            "metadata": {
+                "description": "Number of days to retain data in Application Insights"
+            }
+        },
+        "logAnalyticsRetentionDays": {
+            "type": "int",
+            "defaultValue": 30,
+            "metadata": {
+                "description": "Number of days to retain data in Log Analytics"
+            }
+        },
+        "apiResponseTimeThresholdMs": {
+            "type": "int",
+            "defaultValue": 1000,
+            "metadata": {
+                "description": "Threshold in milliseconds for API response time alerts"
+            }
+        },
+        "apiFailureRateThreshold": {
+            "type": "int",
+            "defaultValue": 5,
+            "metadata": {
+                "description": "Threshold percentage for API failure rate alerts"
+            }
+        },
+        "tags": {
+            "type": "object",
+            "defaultValue": {
+                "Application": "SecurityPatrol",
+                "Component": "Monitoring",
+                "Environment": "[parameters('environment')]"
+            },
+            "metadata": {
+                "description": "Tags to apply to resources"
+            }
+        }
+    },
+    "variables": {
+        "webTestName": "[concat('webtest-security-patrol-', parameters('environment'))]",
+        "apiAvailabilityAlertName": "[concat('alert-api-availability-', parameters('environment'))]",
+        "apiResponseTimeAlertName": "[concat('alert-api-response-time-', parameters('environment'))]",
+        "apiFailureRateAlertName": "[concat('alert-api-failure-rate-', parameters('environment'))]",
+        "diagnosticSettingName": "[concat('diag-security-patrol-', parameters('environment'))]",
+        "appServiceHostName": "[reference(parameters('appServiceId'), '2021-02-01').defaultHostName]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.OperationalInsights/workspaces",
+            "apiVersion": "2021-06-01",
+            "name": "[parameters('logAnalyticsWorkspaceName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "sku": {
+                    "name": "PerGB2018"
+                },
+                "retentionInDays": "[parameters('logAnalyticsRetentionDays')]",
+                "features": {
+                    "enableLogAccessUsingOnlyResourcePermissions": true
+                },
+                "workspaceCapping": {
+                    "dailyQuotaGb": -1
+                },
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+            },
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Insights/components",
+            "apiVersion": "2020-02-02",
+            "name": "[parameters('appInsightsName')]",
+            "location": "[parameters('location')]",
+            "kind": "web",
+            "properties": {
+                "Application_Type": "web",
+                "Flow_Type": "Redfield",
+                "Request_Source": "IbizaAIExtension",
+                "RetentionInDays": "[parameters('appInsightsRetentionDays')]",
+                "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]",
+                "IngestionMode": "LogAnalytics",
+                "publicNetworkAccessForIngestion": "Enabled",
+                "publicNetworkAccessForQuery": "Enabled"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+            ],
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Insights/webtests",
+            "apiVersion": "2022-06-15",
+            "name": "[variables('webTestName')]",
+            "location": "[parameters('location')]",
+            "tags": {
+                "[format('hidden-link:{0}', resourceId('Microsoft.Insights/components', parameters('appInsightsName')))]": "Resource"
+            },
+            "properties": {
+                "SyntheticMonitorId": "[variables('webTestName')]",
+                "Name": "API Health Check",
+                "Description": "Checks the health endpoint of the Security Patrol API",
+                "Enabled": true,
+                "Frequency": 300,
+                "Timeout": 30,
+                "Kind": "ping",
+                "RetryEnabled": true,
+                "Locations": [
+                    {
+                        "Id": "us-ca-sjc-azr"
+                    },
+                    {
+                        "Id": "us-tx-sn1-azr"
+                    },
+                    {
+                        "Id": "us-il-ch1-azr"
+                    },
+                    {
+                        "Id": "us-va-ash-azr"
+                    },
+                    {
+                        "Id": "us-fl-mia-edge"
+                    }
+                ],
+                "Configuration": {
+                    "WebTest": "<WebTest xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\" Name=\"API Health Check\"><Items><Request Method=\"GET\" Url=\"https://[variables('appServiceHostName')]/health\" /></Items></WebTest>"
+                }
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Insights/actionGroups",
+            "apiVersion": "2022-06-01",
+            "name": "[parameters('actionGroupName')]",
+            "location": "global",
+            "properties": {
+                "groupShortName": "SecurityP",
+                "enabled": true,
+                "emailReceivers": [
+                    {
+                        "name": "DevOpsTeam",
+                        "emailAddress": "[parameters('alertEmailAddresses')[0]]",
+                        "useCommonAlertSchema": true
+                    }
+                ]
+            },
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Insights/metricAlerts",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('apiAvailabilityAlertName')]",
+            "location": "global",
+            "properties": {
+                "description": "Alert when API availability drops below 99.9%",
+                "severity": 1,
+                "enabled": true,
+                "scopes": [
+                    "[resourceId('Microsoft.Insights/webtests', variables('webTestName'))]",
+                    "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+                ],
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT15M",
+                "criteria": {
+                    "odata.type": "Microsoft.Azure.Monitor.WebtestLocationAvailabilityCriteria",
+                    "webTestId": "[resourceId('Microsoft.Insights/webtests', variables('webTestName'))]",
+                    "componentId": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]",
+                    "failedLocationCount": 3
+                },
+                "actions": [
+                    {
+                        "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', parameters('actionGroupName'))]"
+                    }
+                ]
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/webtests', variables('webTestName'))]",
+                "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]",
+                "[resourceId('Microsoft.Insights/actionGroups', parameters('actionGroupName'))]"
+            ],
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Insights/metricAlerts",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('apiResponseTimeAlertName')]",
+            "location": "global",
+            "properties": {
+                "description": "Alert when API response time exceeds threshold",
+                "severity": 2,
+                "enabled": true,
+                "scopes": [
+                    "[parameters('appServiceId')]"
+                ],
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT15M",
+                "criteria": {
+                    "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+                    "allOf": [
+                        {
+                            "name": "HttpResponseTime",
+                            "metricNamespace": "Microsoft.Web/sites",
+                            "metricName": "HttpResponseTime",
+                            "operator": "GreaterThan",
+                            "threshold": "[parameters('apiResponseTimeThresholdMs')]",
+                            "timeAggregation": "Average",
+                            "criterionType": "StaticThresholdCriterion"
+                        }
+                    ]
+                },
+                "actions": [
+                    {
+                        "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', parameters('actionGroupName'))]"
+                    }
+                ]
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', parameters('actionGroupName'))]"
+            ],
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Insights/metricAlerts",
+            "apiVersion": "2018-03-01",
+            "name": "[variables('apiFailureRateAlertName')]",
+            "location": "global",
+            "properties": {
+                "description": "Alert when API failure rate exceeds threshold",
+                "severity": 1,
+                "enabled": true,
+                "scopes": [
+                    "[parameters('appServiceId')]"
+                ],
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT15M",
+                "criteria": {
+                    "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+                    "allOf": [
+                        {
+                            "name": "Http5xx",
+                            "metricNamespace": "Microsoft.Web/sites",
+                            "metricName": "Http5xx",
+                            "operator": "GreaterThan",
+                            "threshold": "[parameters('apiFailureRateThreshold')]",
+                            "timeAggregation": "Total",
+                            "criterionType": "StaticThresholdCriterion"
+                        }
+                    ]
+                },
+                "actions": [
+                    {
+                        "actionGroupId": "[resourceId('Microsoft.Insights/actionGroups', parameters('actionGroupName'))]"
+                    }
+                ]
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', parameters('actionGroupName'))]"
+            ],
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Insights/diagnosticSettings",
+            "apiVersion": "2021-05-01-preview",
+            "name": "[variables('diagnosticSettingName')]",
+            "scope": "[parameters('appServiceId')]",
+            "properties": {
+                "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]",
+                "logs": [
+                    {
+                        "category": "AppServiceHTTPLogs",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    },
+                    {
+                        "category": "AppServiceConsoleLogs",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    },
+                    {
+                        "category": "AppServiceAppLogs",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    },
+                    {
+                        "category": "AppServiceAuditLogs",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    }
+                ],
+                "metrics": [
+                    {
+                        "category": "AllMetrics",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    }
+                ]
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Portal/dashboards",
+            "apiVersion": "2020-09-01-preview",
+            "name": "[parameters('dashboardName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "lenses": {
+                    "0": {
+                        "order": 0,
+                        "parts": {
+                            "0": {
+                                "position": {
+                                    "x": 0,
+                                    "y": 0,
+                                    "colSpan": 6,
+                                    "rowSpan": 4
+                                },
+                                "metadata": {
+                                    "inputs": [
+                                        {
+                                            "name": "resourceTypeMode",
+                                            "value": "components"
+                                        },
+                                        {
+                                            "name": "ComponentId",
+                                            "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+                                        }
+                                    ],
+                                    "type": "Extension/AppInsightsExtension/PartType/AvailabilityNavButtonPart",
+                                    "settings": {}
+                                }
+                            },
+                            "1": {
+                                "position": {
+                                    "x": 6,
+                                    "y": 0,
+                                    "colSpan": 6,
+                                    "rowSpan": 4
+                                },
+                                "metadata": {
+                                    "inputs": [
+                                        {
+                                            "name": "resourceTypeMode",
+                                            "value": "components"
+                                        },
+                                        {
+                                            "name": "ComponentId",
+                                            "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+                                        }
+                                    ],
+                                    "type": "Extension/AppInsightsExtension/PartType/PerformanceNavButtonPart",
+                                    "settings": {}
+                                }
+                            },
+                            "2": {
+                                "position": {
+                                    "x": 0,
+                                    "y": 4,
+                                    "colSpan": 6,
+                                    "rowSpan": 4
+                                },
+                                "metadata": {
+                                    "inputs": [
+                                        {
+                                            "name": "resourceTypeMode",
+                                            "value": "components"
+                                        },
+                                        {
+                                            "name": "ComponentId",
+                                            "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+                                        }
+                                    ],
+                                    "type": "Extension/AppInsightsExtension/PartType/UsageNavButtonPart",
+                                    "settings": {}
+                                }
+                            },
+                            "3": {
+                                "position": {
+                                    "x": 6,
+                                    "y": 4,
+                                    "colSpan": 6,
+                                    "rowSpan": 4
+                                },
+                                "metadata": {
+                                    "inputs": [
+                                        {
+                                            "name": "resourceTypeMode",
+                                            "value": "components"
+                                        },
+                                        {
+                                            "name": "ComponentId",
+                                            "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+                                        }
+                                    ],
+                                    "type": "Extension/AppInsightsExtension/PartType/FailuresNavButtonPart",
+                                    "settings": {}
+                                }
+                            },
+                            "4": {
+                                "position": {
+                                    "x": 0,
+                                    "y": 8,
+                                    "colSpan": 6,
+                                    "rowSpan": 4
+                                },
+                                "metadata": {
+                                    "inputs": [
+                                        {
+                                            "name": "queryId",
+                                            "value": "requests"
+                                        },
+                                        {
+                                            "name": "ComponentId",
+                                            "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+                                        }
+                                    ],
+                                    "type": "Extension/AppInsightsExtension/PartType/MetricsExplorerBladePinnedPart",
+                                    "settings": {}
+                                }
+                            },
+                            "5": {
+                                "position": {
+                                    "x": 6,
+                                    "y": 8,
+                                    "colSpan": 6,
+                                    "rowSpan": 4
+                                },
+                                "metadata": {
+                                    "inputs": [
+                                        {
+                                            "name": "queryId",
+                                            "value": "exceptions"
+                                        },
+                                        {
+                                            "name": "ComponentId",
+                                            "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+                                        }
+                                    ],
+                                    "type": "Extension/AppInsightsExtension/PartType/MetricsExplorerBladePinnedPart",
+                                    "settings": {}
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+            ],
+            "tags": "[parameters('tags')]"
+        }
+    ],
+    "outputs": {
+        "appInsightsKey": {
+            "type": "string",
+            "value": "[reference(resourceId('Microsoft.Insights/components', parameters('appInsightsName'))).InstrumentationKey]"
+        },
+        "appInsightsConnectionString": {
+            "type": "string",
+            "value": "[reference(resourceId('Microsoft.Insights/components', parameters('appInsightsName'))).ConnectionString]"
+        },
+        "appInsightsId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.Insights/components', parameters('appInsightsName'))]"
+        },
+        "logAnalyticsWorkspaceId": {
+            "type": "string",
+            "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]"
+        },
+        "dashboardUrl": {
+            "type": "string",
+            "value": "[concat('https://portal.azure.com/#@', tenant().tenantId, '/dashboard/arm', resourceId('Microsoft.Portal/dashboards', parameters('dashboardName')))]"
+        }
+    }
+}
