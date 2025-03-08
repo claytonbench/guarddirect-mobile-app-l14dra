@@ -1,0 +1,26 @@
+# Kubernetes Service manifest for Security Patrol API
+# This service provides internal cluster access to the API pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: security-patrol-api
+  namespace: security-patrol
+  labels:
+    app: security-patrol
+    component: api
+  annotations:
+    kubernetes.io/description: "Service for Security Patrol API"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "80"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: security-patrol
+    component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+  type: ClusterIP
+  sessionAffinity: None
