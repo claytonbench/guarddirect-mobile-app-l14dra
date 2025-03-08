@@ -1,0 +1,252 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/**/*.cs'
+      - 'src/**/*.csproj'
+      - 'src/**/*.xaml'
+      - '.github/workflows/security-scan.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/**/*.cs'
+      - 'src/**/*.csproj'
+      - 'src/**/*.xaml'
+  schedule:
+    - cron: '0 0 * * 0'  # Run at midnight every Sunday
+  workflow_dispatch:
+    inputs:
+      full_scan:
+        description: 'Run full security scan (may take longer)'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  JAVA_VERSION: '17'
+  DEPENDENCY_CHECK_VERSION: '7.4.0'
+  MAX_CRITICAL_VULNERABILITIES: '0'
+  MAX_HIGH_VULNERABILITIES: '5'
+  SECURITY_SCAN_LEVEL: ${{ github.event.inputs.full_scan == 'true' && 'Full' || 'Standard' }}
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Install OWASP Dependency Check
+        run: |
+          mkdir -p $HOME/.local/bin
+          curl -L https://github.com/jeremylong/DependencyCheck/releases/download/v${{ env.DEPENDENCY_CHECK_VERSION }}/dependency-check-${{ env.DEPENDENCY_CHECK_VERSION }}-release.zip -o dependency-check.zip
+          unzip dependency-check.zip -d $HOME/.local/
+          rm dependency-check.zip
+          echo "$HOME/.local/dependency-check/bin" >> $GITHUB_PATH
+
+      - name: Run mobile app dependency scan
+        run: dependency-check.sh --project "SecurityPatrol-Mobile" --scan src/android --out reports/dependency-scan --format ALL
+
+      - name: Run backend dependency scan
+        run: dependency-check.sh --project "SecurityPatrol-Backend" --scan src/backend --out reports/dependency-scan --format ALL
+
+      - name: Generate vulnerability report
+        run: |
+          mkdir -p reports/dependency-scan
+          cp -r *.json reports/dependency-scan/ || true
+
+      - name: Check vulnerability thresholds
+        run: |
+          if [[ $(grep -c "<severity>Critical</severity>" reports/dependency-scan/dependency-check-report.xml) -gt ${{ env.MAX_CRITICAL_VULNERABILITIES }} ]]; then
+            echo "Critical vulnerabilities exceed threshold!"
+            exit 1
+          fi
+          if [[ $(grep -c "<severity>High</severity>" reports/dependency-scan/dependency-check-report.xml) -gt ${{ env.MAX_HIGH_VULNERABILITIES }} ]]; then
+            echo "High vulnerabilities exceed threshold!"
+            exit 1
+          fi
+
+      - name: Upload vulnerability report
+        uses: actions/upload-artifact@v3
+        with:
+          name: dependency-scan-report
+          path: reports/dependency-scan
+          retention-days: 30
+
+  code-analysis:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: csharp
+
+      - name: Build solution
+        run: |
+          dotnet build src/android/SecurityPatrol.sln
+          dotnet build src/backend/SecurityPatrol.sln
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v2
+
+      - name: Run custom static analysis
+        run: |
+          dotnet security-analyzer --scan-dir src --output reports/code-analysis/code-analysis-report.txt
+
+      - name: Generate security report
+        run: |
+          mkdir -p reports/code-analysis
+          cp -r *.json reports/code-analysis/ || true
+
+      - name: Check security issue thresholds
+        run: |
+          if [[ $(grep -c "Critical Security Issue" reports/code-analysis/code-analysis-report.txt) -gt 0 ]]; then
+            echo "Critical security issues found!"
+            exit 1
+          fi
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-analysis-report
+          path: reports/code-analysis
+          retention-days: 30
+
+  security-testing:
+    name: Security Testing
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, code-analysis]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Run API security tests
+        run: |
+          dotnet test src/test/SecurityTests/ApiSecurityTests.csproj --filter "FullyQualifiedName~API.EndpointSecurityTests" --logger "console;verbosity=detailed" -- NUnit.NumberOfTestWorkers=1
+
+      - name: Run data storage security tests
+        run: |
+          dotnet test src/test/SecurityTests/DataSecurityTests.csproj --filter "FullyQualifiedName~Mobile.DataStorageSecurityTests" --logger "console;verbosity=detailed" -- NUnit.NumberOfTestWorkers=1
+
+      - name: Run authentication security tests
+        run: |
+          dotnet test src/test/SecurityTests/AuthSecurityTests.csproj --filter "FullyQualifiedName~API.AuthenticationSecurityTests" --logger "console;verbosity=detailed" -- NUnit.NumberOfTestWorkers=1
+
+      - name: Generate test report
+        run: |
+          mkdir -p reports/security-tests
+          cp -r TestResults/security-test-report.* reports/security-tests/
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-test-report
+          path: reports/security-tests
+          retention-days: 30
+
+  secret-scanning:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup secret scanning tool
+        run: pip install detect-secrets
+
+      - name: Run secret scanning
+        run: |
+          mkdir -p reports/secret-scan
+          detect-secrets scan --all-files > reports/secret-scan/secrets-report.json
+
+      - name: Generate secret scanning report
+        run: |
+          detect-secrets audit reports/secret-scan/secrets-report.json --report-only > reports/secret-scan/secrets-report.txt || true
+
+      - name: Check for secrets
+        run: |
+          if [[ $(grep -c "True positive" reports/secret-scan/secrets-report.txt) -gt 0 ]]; then
+            echo "Secrets found in code!"
+            exit 1
+          fi
+
+      - name: Upload secret scanning report
+        uses: actions/upload-artifact@v3
+        with:
+          name: secret-scan-report
+          path: reports/secret-scan
+          retention-days: 30
+
+  security-report:
+    name: Security Report Generation
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, code-analysis, security-testing, secret-scanning]
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: reports
+
+      - name: Combine reports
+        run: |
+          mkdir -p reports/consolidated
+          python scripts/combine_security_reports.py --input-dir reports --output-dir reports/consolidated
+
+      - name: Generate security score
+        run: |
+          python scripts/calculate_security_score.py --input-dir reports/consolidated --output-file reports/consolidated/security-score.json
+
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v3
+        with:
+          name: consolidated-security-report
+          path: reports/consolidated
+          retention-days: 90
+
+      - name: Post findings summary
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const score = JSON.parse(fs.readFileSync('reports/consolidated/security-score.json', 'utf8'));
+            const comment = `## Security Scan Results\n\nSecurity Score: ${score.overall}/100\n\n### Summary\n\n- Dependency Vulnerabilities: ${score.dependency_vulnerabilities}\n- Code Analysis Issues: ${score.code_analysis_issues}\n- Security Test Failures: ${score.security_test_failures}\n- Secrets Found: ${score.secrets_found}\n\n[Full Report](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+        if: github.event_name == 'pull_request'
