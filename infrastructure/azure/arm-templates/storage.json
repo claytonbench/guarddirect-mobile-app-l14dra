@@ -1,0 +1,515 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "resourceGroupName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the resource group where resources will be deployed"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Primary location for all resources"
+            }
+        },
+        "secondaryLocation": {
+            "type": "string",
+            "defaultValue": "westus",
+            "metadata": {
+                "description": "Secondary location for geo-replicated resources"
+            }
+        },
+        "environment": {
+            "type": "string",
+            "allowedValues": [
+                "dev",
+                "staging",
+                "prod"
+            ],
+            "metadata": {
+                "description": "Deployment environment (dev, staging, prod)"
+            }
+        },
+        "storageAccountName": {
+            "type": "string",
+            "defaultValue": "[concat('stsecuritypatrol', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Storage Account"
+            }
+        },
+        "storageAccountSku": {
+            "type": "string",
+            "defaultValue": "Standard_LRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Standard_RAGRS",
+                "Standard_ZRS",
+                "Premium_LRS",
+                "Premium_ZRS"
+            ],
+            "metadata": {
+                "description": "Storage Account SKU"
+            }
+        },
+        "keyVaultName": {
+            "type": "string",
+            "defaultValue": "[concat('kv-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Key Vault to store secrets"
+            }
+        },
+        "keyVaultResourceGroupName": {
+            "type": "string",
+            "defaultValue": "[parameters('resourceGroupName')]",
+            "metadata": {
+                "description": "Resource group containing the Key Vault"
+            }
+        },
+        "enableGeoReplication": {
+            "type": "bool",
+            "defaultValue": "[equals(parameters('environment'), 'prod')]",
+            "metadata": {
+                "description": "Enable geo-replication for high availability"
+            }
+        },
+        "enableAdvancedThreatProtection": {
+            "type": "bool",
+            "defaultValue": "[equals(parameters('environment'), 'prod')]",
+            "metadata": {
+                "description": "Enable advanced threat protection for Storage Account"
+            }
+        },
+        "logAnalyticsWorkspaceName": {
+            "type": "string",
+            "defaultValue": "[concat('law-security-patrol-', parameters('environment'))]",
+            "metadata": {
+                "description": "Name of the Log Analytics Workspace for storage diagnostics"
+            }
+        },
+        "logAnalyticsWorkspaceResourceGroupName": {
+            "type": "string",
+            "defaultValue": "[parameters('resourceGroupName')]",
+            "metadata": {
+                "description": "Resource group containing the Log Analytics Workspace"
+            }
+        },
+        "tags": {
+            "type": "object",
+            "defaultValue": {
+                "Application": "SecurityPatrol",
+                "Environment": "[parameters('environment')]"
+            },
+            "metadata": {
+                "description": "Tags to apply to resources"
+            }
+        }
+    },
+    "variables": {
+        "keyVaultId": "[resourceId(parameters('keyVaultResourceGroupName'), 'Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "logAnalyticsWorkspaceId": "[resourceId(parameters('logAnalyticsWorkspaceResourceGroupName'), 'Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsWorkspaceName'))]",
+        "storageAccountSecondaryName": "[concat(parameters('storageAccountName'), '-secondary')]",
+        "photosContainerName": "photos",
+        "reportsContainerName": "reports",
+        "checkpointsContainerName": "checkpoints",
+        "storageConnectionStringName": "StorageConnectionString",
+        "storageAccountKeyName": "StorageAccountKey",
+        "diagnosticSettingName": "[concat('diag-storage-', parameters('environment'))]",
+        "storageConnectionString": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2021-09-01').keys[0].value, ';EndpointSuffix=core.windows.net')]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2021-09-01",
+            "name": "[parameters('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('storageAccountSku')]"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "accessTier": "Hot",
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "networkAcls": {
+                    "bypass": "AzureServices",
+                    "defaultAction": "Allow"
+                },
+                "encryption": {
+                    "services": {
+                        "blob": {
+                            "enabled": true
+                        },
+                        "file": {
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                }
+            },
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(parameters('storageAccountName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "deleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 30
+                },
+                "containerDeleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 30
+                },
+                "cors": {
+                    "corsRules": [
+                        {
+                            "allowedOrigins": [
+                                "*"
+                            ],
+                            "allowedMethods": [
+                                "GET",
+                                "PUT",
+                                "POST"
+                            ],
+                            "maxAgeInSeconds": 3600,
+                            "exposedHeaders": [
+                                "*"
+                            ],
+                            "allowedHeaders": [
+                                "*"
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(parameters('storageAccountName'), '/default/', variables('photosContainerName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(parameters('storageAccountName'), '/default/', variables('reportsContainerName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(parameters('storageAccountName'), '/default/', variables('checkpointsContainerName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/managementPolicies",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(parameters('storageAccountName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', variables('photosContainerName'))]"
+            ],
+            "properties": {
+                "policy": {
+                    "rules": [
+                        {
+                            "name": "PhotosLifecycle",
+                            "enabled": true,
+                            "type": "Lifecycle",
+                            "definition": {
+                                "filters": {
+                                    "blobTypes": [
+                                        "blockBlob"
+                                    ],
+                                    "prefixMatch": [
+                                        "[concat(variables('photosContainerName'), '/')]"
+                                    ]
+                                },
+                                "actions": {
+                                    "baseBlob": {
+                                        "tierToCool": {
+                                            "daysAfterModificationGreaterThan": 30
+                                        },
+                                        "delete": {
+                                            "daysAfterModificationGreaterThan": 365
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "condition": "[parameters('enableAdvancedThreatProtection')]",
+            "type": "Microsoft.Security/advancedThreatProtectionSettings",
+            "apiVersion": "2019-01-01",
+            "name": "[concat(parameters('storageAccountName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "isEnabled": true
+            }
+        },
+        {
+            "condition": "[parameters('enableGeoReplication')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2021-09-01",
+            "name": "[variables('storageAccountSecondaryName')]",
+            "location": "[parameters('secondaryLocation')]",
+            "sku": {
+                "name": "[parameters('storageAccountSku')]"
+            },
+            "kind": "StorageV2",
+            "properties": {
+                "accessTier": "Hot",
+                "supportsHttpsTrafficOnly": true,
+                "minimumTlsVersion": "TLS1_2",
+                "allowBlobPublicAccess": false,
+                "networkAcls": {
+                    "bypass": "AzureServices",
+                    "defaultAction": "Allow"
+                },
+                "encryption": {
+                    "services": {
+                        "blob": {
+                            "enabled": true
+                        },
+                        "file": {
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                }
+            },
+            "tags": "[parameters('tags')]"
+        },
+        {
+            "condition": "[parameters('enableGeoReplication')]",
+            "type": "Microsoft.Storage/storageAccounts/blobServices",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(variables('storageAccountSecondaryName'), '/default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountSecondaryName'))]"
+            ],
+            "properties": {
+                "deleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 30
+                },
+                "containerDeleteRetentionPolicy": {
+                    "enabled": true,
+                    "days": 30
+                }
+            }
+        },
+        {
+            "condition": "[parameters('enableGeoReplication')]",
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(variables('storageAccountSecondaryName'), '/default/', variables('photosContainerName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountSecondaryName'), 'default')]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "condition": "[parameters('enableGeoReplication')]",
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(variables('storageAccountSecondaryName'), '/default/', variables('reportsContainerName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountSecondaryName'), 'default')]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "condition": "[parameters('enableGeoReplication')]",
+            "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+            "apiVersion": "2021-09-01",
+            "name": "[concat(variables('storageAccountSecondaryName'), '/default/', variables('checkpointsContainerName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountSecondaryName'), 'default')]"
+            ],
+            "properties": {
+                "publicAccess": "None"
+            }
+        },
+        {
+            "type": "Microsoft.Insights/diagnosticSettings",
+            "apiVersion": "2021-05-01-preview",
+            "name": "[variables('diagnosticSettingName')]",
+            "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "workspaceId": "[variables('logAnalyticsWorkspaceId')]",
+                "metrics": [
+                    {
+                        "category": "Transaction",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    },
+                    {
+                        "category": "Capacity",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Insights/diagnosticSettings",
+            "apiVersion": "2021-05-01-preview",
+            "name": "[concat(variables('diagnosticSettingName'), '-blob')]",
+            "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storageAccountName'), 'default')]"
+            ],
+            "properties": {
+                "workspaceId": "[variables('logAnalyticsWorkspaceId')]",
+                "logs": [
+                    {
+                        "category": "StorageRead",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    },
+                    {
+                        "category": "StorageWrite",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    },
+                    {
+                        "category": "StorageDelete",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    }
+                ],
+                "metrics": [
+                    {
+                        "category": "Transaction",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    },
+                    {
+                        "category": "Capacity",
+                        "enabled": true,
+                        "retentionPolicy": {
+                            "days": 30,
+                            "enabled": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults/secrets",
+            "apiVersion": "2021-11-01-preview",
+            "name": "[concat(parameters('keyVaultName'), '/', variables('storageConnectionStringName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "value": "[variables('storageConnectionString')]",
+                "contentType": "text/plain"
+            }
+        },
+        {
+            "type": "Microsoft.KeyVault/vaults/secrets",
+            "apiVersion": "2021-11-01-preview",
+            "name": "[concat(parameters('keyVaultName'), '/', variables('storageAccountKeyName'))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+            ],
+            "properties": {
+                "value": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2021-09-01').keys[0].value]",
+                "contentType": "text/plain"
+            }
+        }
+    ],
+    "outputs": {
+        "storageAccountName": {
+            "type": "string",
+            "value": "[parameters('storageAccountName')]"
+        },
+        "blobEndpoint": {
+            "type": "string",
+            "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))).primaryEndpoints.blob]"
+        },
+        "photosContainerUrl": {
+            "type": "string",
+            "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))).primaryEndpoints.blob, variables('photosContainerName'))]"
+        },
+        "reportsContainerUrl": {
+            "type": "string",
+            "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))).primaryEndpoints.blob, variables('reportsContainerName'))]"
+        },
+        "checkpointsContainerUrl": {
+            "type": "string",
+            "value": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))).primaryEndpoints.blob, variables('checkpointsContainerName'))]"
+        },
+        "storageConnectionString": {
+            "type": "string",
+            "value": "[variables('storageConnectionString')]"
+        },
+        "secondaryStorageAccountName": {
+            "condition": "[parameters('enableGeoReplication')]",
+            "type": "string",
+            "value": "[variables('storageAccountSecondaryName')]"
+        },
+        "secondaryBlobEndpoint": {
+            "condition": "[parameters('enableGeoReplication')]",
+            "type": "string",
+            "value": "[if(parameters('enableGeoReplication'), reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountSecondaryName'))).primaryEndpoints.blob, '')]"
+        }
+    }
+}
