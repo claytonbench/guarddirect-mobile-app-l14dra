@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Server=db;Database=SecurityPatrol;User Id=sa;Password=${DB_PASSWORD};TrustServerCertificate=True;
+      - JWT__SecretKey=${JWT_SECRET_KEY}
+      - JWT__Issuer=SecurityPatrol.API
+      - JWT__Audience=SecurityPatrol.Client
+      - JWT__TokenExpirationHours=8
+      - SmsService__ApiKey=${SMS_API_KEY}
+      - Storage__BasePath=/app/storage
+      - FeatureManagement__DetailedErrorMessages=false
+      - FeatureManagement__EnableSwagger=false
+      - Security__RequireHttps=true
+    volumes:
+      - api-storage:/app/storage
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - securitypatrol-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=${DB_PASSWORD}
+      - MSSQL_PID=Express
+    volumes:
+      - sqldata:/var/opt/mssql
+    restart: unless-stopped
+    networks:
+      - securitypatrol-network
+    healthcheck:
+      test: ["/opt/mssql-tools/bin/sqlcmd", "-S", "localhost", "-U", "sa", "-P", "${DB_PASSWORD}", "-Q", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  sqldata:
+  api-storage:
+
+networks:
+  securitypatrol-network:
+    driver: bridge
