@@ -1,0 +1,77 @@
+**/[Oo]bj/
+**/[Bb]in/
+**/[Dd]ebug/
+**/[Rr]elease/
+**/x64/
+**/x86/
+**/[Aa]rtifacts/
+
+# Version control system directories
+**/.git/
+
+# IDE and editor directories
+**/.vs/
+**/.vscode/
+**/.idea/
+
+# User-specific files
+**/*.user
+**/*.userosscache
+**/*.suo
+**/*.userprefs
+**/*.sln.iml
+
+# NuGet package files
+**/[Pp]ackages/
+**/*.nupkg
+**/*.snupkg
+
+# Test Results
+**/[Tt]est[Rr]esults/
+**/coverage/
+**/*.coverage
+**/coverage.json
+**/coverage.xml
+
+# Database project files
+**/*.dbmdl
+**/*.jfm
+
+# Log files
+**/[Ll]og/
+**/[Ll]ogs/
+
+# Docker files
+**/.dockerignore
+**/Dockerfile*
+**/docker-compose*
+
+# Documentation
+**/*.md
+
+# OS specific files
+**/.DS_Store
+**/Thumbs.db
+
+# Security sensitive files
+**/*.pfx
+**/*.key
+
+# Configuration files
+**/appsettings.*.json
+!**/appsettings.json
+
+# Data directories
+**/storage/
+
+# Temporary files
+**/*.tmp
+**/*.temp
+**/*.swp
+
+# Test projects
+**/SecurityPatrol.UnitTests/
+**/SecurityPatrol.IntegrationTests/
+
+# Solution file (not needed in the build)
+**/*.sln
