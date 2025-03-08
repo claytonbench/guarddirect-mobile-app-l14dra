@@ -1,0 +1,127 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "resourceGroupName": {
+      "value": "rg-security-patrol-prod"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "secondaryLocation": {
+      "value": "westus"
+    },
+    "environment": {
+      "value": "prod"
+    },
+    "appServicePlanName": {
+      "value": "asp-security-patrol-prod"
+    },
+    "appServiceName": {
+      "value": "app-security-patrol-prod"
+    },
+    "appServiceSku": {
+      "value": {
+        "name": "S1",
+        "tier": "Standard",
+        "size": "S1",
+        "family": "S",
+        "capacity": 2
+      }
+    },
+    "keyVaultName": {
+      "value": "kv-security-patrol-prod"
+    },
+    "keyVaultResourceGroupName": {
+      "value": "rg-security-patrol-prod"
+    },
+    "appInsightsName": {
+      "value": "ai-security-patrol-prod"
+    },
+    "appInsightsResourceGroupName": {
+      "value": "rg-security-patrol-prod"
+    },
+    "logAnalyticsWorkspaceName": {
+      "value": "law-security-patrol-prod"
+    },
+    "logAnalyticsWorkspaceResourceGroupName": {
+      "value": "rg-security-patrol-prod"
+    },
+    "sqlServerName": {
+      "value": "sql-security-patrol-prod"
+    },
+    "sqlDatabaseName": {
+      "value": "SecurityPatrolDb"
+    },
+    "sqlDatabaseSku": {
+      "value": "S3"
+    },
+    "sqlAdminLogin": {
+      "value": "sqladmin"
+    },
+    "sqlAdminPassword": {
+      "value": null
+    },
+    "storageAccountName": {
+      "value": "stsecuritypatrolprod"
+    },
+    "storageAccountSku": {
+      "value": "Standard_GRS"
+    },
+    "enableGeoReplication": {
+      "value": true
+    },
+    "enableAdvancedThreatProtection": {
+      "value": true
+    },
+    "enableAuditing": {
+      "value": true
+    },
+    "enableAutoScale": {
+      "value": true
+    },
+    "minCapacity": {
+      "value": 2
+    },
+    "maxCapacity": {
+      "value": 10
+    },
+    "cpuPercentageThreshold": {
+      "value": 60
+    },
+    "appInsightsRetentionDays": {
+      "value": 90
+    },
+    "logAnalyticsRetentionDays": {
+      "value": 90
+    },
+    "actionGroupName": {
+      "value": "ag-security-patrol-prod"
+    },
+    "alertEmailAddresses": {
+      "value": [
+        "devops@example.com",
+        "securityteam@example.com",
+        "operations@example.com"
+      ]
+    },
+    "dashboardName": {
+      "value": "dashboard-security-patrol-prod"
+    },
+    "apiResponseTimeThresholdMs": {
+      "value": 500
+    },
+    "apiFailureRateThreshold": {
+      "value": 1
+    },
+    "tags": {
+      "value": {
+        "Application": "SecurityPatrol",
+        "Environment": "Production",
+        "CostCenter": "IT-Security",
+        "ManagedBy": "DevOps",
+        "Criticality": "High"
+      }
+    }
+  }
+}
