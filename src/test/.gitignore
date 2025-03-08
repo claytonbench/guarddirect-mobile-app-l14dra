@@ -1,0 +1,68 @@
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+# Visual Studio Test Runner
+*.testlog
+*.manifest
+
+# MSTest test Results
+[Tt]est[Rr]esult*/
+*.TestResults.xml
+
+# NUnit
+TestResult.xml
+nunit-*.xml
+
+# xUnit
+xunit-*.xml
+
+# Build Results specific to tests
+*/bin/Debug/test/
+*/bin/Release/test/
+*/obj/Debug/test/
+*/obj/Release/test/
+
+# Test project specific files
+*.runsettings.user
+*.testsettings.user
+
+# Test data and temporary files
+SecurityPatrol.TestCommon/Data/temp/
+*/TestData/temp/
+*/TestImages/temp/
+
+# Mock API responses for testing
+*/MockResponses/temp/
+
+# Local test configurations
+*.local.json
+appsettings.*.local.json
+
+# Test coverage reports
+coverage/
+coverage-report/
+*.opencover.xml
+*.cobertura.xml
+
+# Performance test results
+PerformanceResults/
+BenchmarkDotNet.Artifacts/
+
+# UI Test screenshots and recordings
+*/UITests/Screenshots/
+*/UITests/Recordings/
+
+# App Center test cloud files
+*.appcenter-ms
+
+# Test environment specific files
+*.env.test
+*.env.local
+
+# Temporary test databases
+*.test.db
+*.test.db-shm
+*.test.db-wal
