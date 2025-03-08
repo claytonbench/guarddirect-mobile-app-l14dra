@@ -1,0 +1,116 @@
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa]rtifacts/
+
+# .NET MAUI specific
+Resource.designer.cs
+**/*.g.cs
+Resources/Resource.designer.cs
+
+# Mobile app packages
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# User-specific files
+*.user
+*.suo
+*.userprefs
+*.userosscache
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.sln.iml
+
+# NuGet packages
+[Pp]ackages/
+*.nupkg
+*.snupkg
+
+# Test results
+[Tt]est[Rr]esult*/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage.json
+coverage.xml
+[Cc]overage/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.mdf
+*.ldf
+*.bak
+
+# Logs
+*.log
+[Ll]og/
+[Ll]ogs/
+
+# Configuration files with sensitive data
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+appsettings.*.json
+appsettings.local.json
+secrets.json
+*.env
+.env.*
+local.properties
+
+# Security files
+*.pfx
+*.key
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Docker files
+docker-compose.override.yml
+
+# App Center
+*.appcenter-ms
+
+# Performance test results
+PerformanceResults/
+BenchmarkDotNet.Artifacts/
+
+# UI Test artifacts
+*/UITests/Screenshots/
+*/UITests/Recordings/
+
+# Visual Studio launch settings
+launchSettings.json
+
+# Project-specific temporary directories
+SecurityPatrol.TestCommon/Data/temp/
+*/TestData/temp/
+*/TestImages/temp/
+*/MockResponses/temp/
+
+# Infrastructure as Code temporary files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraformrc
+terraform.rc
