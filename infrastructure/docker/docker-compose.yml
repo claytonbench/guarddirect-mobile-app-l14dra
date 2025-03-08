@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # The Security Patrol API service that handles authentication, data processing, and business logic
+  api:
+    build:
+      context: ../../
+      dockerfile: api.dockerfile
+      target: ${BUILD_TARGET:-production}
+    ports:
+      - "8080:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ENVIRONMENT:-Production}
+      - ConnectionStrings__DefaultConnection=Server=db;Database=SecurityPatrol;User Id=sa;Password=${DB_PASSWORD:-StrongPassword!123};TrustServerCertificate=True;
+      - Storage__BasePath=/app/storage
+      - JWT__SecretKey=${JWT_SECRET:-REPLACE_WITH_STRONG_SECRET_KEY_AT_LEAST_32_CHARS}
+      - SmsService__ApiKey=${SMS_API_KEY:-REPLACE_WITH_ACTUAL_SMS_API_KEY}
+      - ApiKey__Key=${API_KEY:-REPLACE_WITH_ACTUAL_API_KEY}
+    volumes:
+      - api_storage:/app/storage
+    depends_on:
+      - db
+    restart: unless-stopped
+    healthcheck:
+      test: curl --fail http://localhost:80/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - security_patrol_network
+
+  # SQL Server database for storing application data
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${DB_PASSWORD:-StrongPassword!123}
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - db_data:/var/opt/mssql
+    restart: unless-stopped
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "${DB_PASSWORD:-StrongPassword!123}" -Q 'SELECT 1' || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - security_patrol_network
+
+volumes:
+  # Persistent storage for uploaded files and application data
+  api_storage:
+    driver: local
+  # Persistent storage for SQL Server database files
+  db_data:
+    driver: local
+
+networks:
+  # Internal network for Security Patrol services
+  security_patrol_network:
+    driver: bridge
