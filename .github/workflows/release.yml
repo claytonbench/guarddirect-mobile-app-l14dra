@@ -1,0 +1,314 @@
+# Workflow configuration for release process
+name: Release
+
+# Workflow triggers
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number for the release (e.g., 1.0.0)'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment for deployment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      skip_security_validation:
+        description: 'Skip security validation (not recommended)'
+        required: false
+        type: boolean
+        default: false
+
+# Environment variables used throughout the workflow
+env:
+  DOTNET_VERSION: '8.0.x'
+  JAVA_VERSION: '17'
+  RELEASE_VERSION: '${{ github.event.inputs.version || github.ref_name }}'
+  DEPLOY_ENVIRONMENT: "${{ github.event.inputs.environment || 'production' }}"
+
+# Concurrency settings to prevent multiple releases at the same time
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Jobs to be executed in the workflow
+jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      # Checkout the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v3 # actions/checkout v3
+        with:
+          fetch-depth: 0
+
+      # Extract version information from the tag or input
+      - name: Extract version information
+        id: version
+        run: echo "VERSION=${RELEASE_VERSION#v}" >> $GITHUB_OUTPUT
+
+      # Generate release notes from commit history
+      - name: Generate release notes
+        run: git log $(git describe --tags --abbrev=0 HEAD^)..HEAD --pretty=format:"* %s" > release-notes.md
+
+      # Create GitHub release if triggered by a tag
+      - name: Create GitHub release
+        if: "startsWith(github.ref, 'refs/tags/')"
+        uses: actions/github-script@v6 # actions/github-script v6
+        with:
+          script: |
+            const fs = require('fs');
+            const releaseNotes = fs.readFileSync('release-notes.md', 'utf8');
+            github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace('refs/tags/', ''),
+              name: `Release ${context.ref.replace('refs/tags/', '')}`,
+              body: releaseNotes,
+              draft: false,
+              prerelease: false
+            });
+
+      # Upload release notes as an artifact
+      - name: Upload release notes
+        uses: actions/upload-artifact@v3 # actions/upload-artifact v3
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 90
+
+  security:
+    name: Security Validation
+    needs: prepare
+    runs-on: ubuntu-latest
+    if: "!github.event.inputs.skip_security_validation"
+    steps:
+      # Checkout the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v3 # actions/checkout v3
+
+      # Setup .NET SDK for running security tests
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3 # actions/setup-dotnet v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Run dependency vulnerability scan
+      - name: Run dependency vulnerability scan
+        run: dotnet test src/test/SecurityScanning/SecurityPatrol.VulnerabilityScan/SecurityPatrol.VulnerabilityScan.csproj --filter Category=DependencyScan -c Release
+
+      # Run static code analysis
+      - name: Run static code analysis
+        run: dotnet test src/test/SecurityScanning/SecurityPatrol.VulnerabilityScan/SecurityPatrol.VulnerabilityScan.csproj --filter Category=StaticAnalysis -c Release
+
+      # Generate security report
+      - name: Generate security report
+        run: dotnet test src/test/SecurityScanning/SecurityPatrol.SecurityTests/SecurityPatrol.SecurityTests.csproj --filter Category=SecurityReport -c Release --logger "trx;LogFileName=security-report.trx"
+
+      # Convert security report to PDF
+      - name: Convert security report to PDF
+        run: dotnet tool install -g trx2pdf && trx2pdf TestResults/security-report.trx security-report.pdf
+
+      # Upload security report as an artifact
+      - name: Upload security report
+        uses: actions/upload-artifact@v3 # actions/upload-artifact v3
+        with:
+          name: security-report
+          path: security-report.pdf
+          retention-days: 90
+
+  infrastructure:
+    name: Deploy Infrastructure
+    needs: [prepare, security]
+    runs-on: ubuntu-latest
+    environment: ${{ env.DEPLOY_ENVIRONMENT }}
+    steps:
+      # Checkout the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v3 # actions/checkout v3
+
+      # Setup Azure credentials for deployment
+      - name: Setup Azure credentials
+        uses: azure/login@v1 # azure/login v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Run infrastructure provisioning script
+      - name: Run infrastructure provisioning script
+        run: bash infrastructure/scripts/provision-infrastructure.sh -e ${{ env.DEPLOY_ENVIRONMENT }} -a true -o infrastructure-outputs.json
+        shell: bash
+
+      # Validate infrastructure deployment
+      - name: Validate infrastructure deployment
+        run: jq -e '.app_service_name' infrastructure-outputs.json || exit 1
+
+      # Upload infrastructure outputs as an artifact
+      - name: Upload infrastructure outputs
+        uses: actions/upload-artifact@v3 # actions/upload-artifact v3
+        with:
+          name: infrastructure-outputs
+          path: infrastructure-outputs.json
+          retention-days: 90
+
+  backend:
+    name: Deploy Backend
+    needs: infrastructure
+    runs-on: ubuntu-latest
+    environment: ${{ env.DEPLOY_ENVIRONMENT }}
+    steps:
+      # Checkout the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v3 # actions/checkout v3
+
+      # Setup .NET SDK for building and testing
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3 # actions/setup-dotnet v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Download infrastructure outputs
+      - name: Download infrastructure outputs
+        uses: actions/download-artifact@v3 # actions/download-artifact v3
+        with:
+          name: infrastructure-outputs
+          path: .
+
+      # Setup Azure credentials for deployment
+      - name: Setup Azure credentials
+        uses: azure/login@v1 # azure/login v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # Build and deploy backend services
+      - name: Build and deploy backend
+        run: bash infrastructure/scripts/deploy-backend.sh -e ${{ env.DEPLOY_ENVIRONMENT }} -t ${{ needs.prepare.outputs.version }}
+        shell: bash
+
+      # Run backend validation tests
+      - name: Run backend validation tests
+        run: dotnet test src/test/API/SecurityPatrol.API.IntegrationTests/API/EndpointResponseTimeTests.cs -c Release
+
+      # Generate deployment report
+      - name: Generate deployment report
+        run: |
+          echo "# Backend Deployment Report
+
+          Version: ${{ needs.prepare.outputs.version }}
+          Environment: ${{ env.DEPLOY_ENVIRONMENT }}
+          Timestamp: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+
+          ## Deployed Services
+
+          $(jq -r '.app_service_name' infrastructure-outputs.json)
+          " > deployment-report.md
+
+      # Upload deployment report as an artifact
+      - name: Upload deployment report
+        uses: actions/upload-artifact@v3 # actions/upload-artifact v3
+        with:
+          name: deployment-report
+          path: deployment-report.md
+          retention-days: 90
+
+  android:
+    name: Publish Android App
+    needs: [prepare, security]
+    runs-on: ubuntu-latest
+    environment: ${{ env.DEPLOY_ENVIRONMENT }}
+    steps:
+      # Checkout the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v3 # actions/checkout v3
+
+      # Setup Java environment for Android app publishing
+      - name: Setup Java
+        uses: actions/setup-java@v3 # actions/setup-java v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # Setup .NET SDK for building the Android app
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3 # actions/setup-dotnet v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Build and sign the Android app
+      - name: Build and sign Android app
+        run: dotnet build src/android/SecurityPatrol/SecurityPatrol.csproj -c Release -p:AndroidKeyStore=true -p:AndroidSigningKeyStore=securitypatrol.keystore -p:AndroidSigningKeyAlias=${{ secrets.ANDROID_KEY_ALIAS }} -p:AndroidSigningKeyPass=${{ secrets.ANDROID_KEY_PASSWORD }} -p:AndroidSigningStorePass=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+
+      # Download release notes for Google Play
+      - name: Download release notes
+        uses: actions/download-artifact@v3 # actions/download-artifact v3
+        with:
+          name: release-notes
+          path: .
+
+      # Upload the signed APK to Google Play Store
+      - name: Upload to Google Play
+        uses: r0adkll/upload-google-play@v1 # r0adkll/upload-google-play v1
+        with:
+          serviceAccountJsonPlainText: '${{ secrets.GOOGLE_PLAY_API_CREDENTIALS }}'
+          packageName: com.securitypatrol.app
+          releaseFiles: 'src/android/SecurityPatrol/bin/Release/net8.0-android/com.securitypatrol.app-Signed.aab'
+          track: production
+          status: completed
+          releaseName: '${{ needs.prepare.outputs.version }}'
+          whatsNewDirectory: .
+
+  notify:
+    name: Send Notifications
+    needs: [backend, android]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      # Download release notes
+      - name: Download release notes
+        uses: actions/download-artifact@v3 # actions/download-artifact v3
+        with:
+          name: release-notes
+          path: .
+
+      # Download deployment report
+      - name: Download deployment report
+        uses: actions/download-artifact@v3 # actions/download-artifact v3
+        with:
+          name: deployment-report
+          path: .
+
+      # Generate notification summary
+      - name: Generate notification summary
+        run: |
+          echo "# Release ${{ needs.prepare.outputs.version }} Completed
+
+          $(cat release-notes.md)
+
+          $(cat deployment-report.md)" > notification.md
+
+      # Send Slack notification
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.23.0 # slackapi/slack-github-action v1.23.0
+        with:
+          payload-file-path: notification.md
+        env:
+          SLACK_WEBHOOK_URL: '${{ secrets.SLACK_WEBHOOK_URL }}'
+
+      # Send email notification
+      - name: Send email notification
+        run: |
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.EMAIL_NOTIFICATION_API_KEY }}" \
+            -d '{"subject":"Security Patrol App Release ${{ needs.prepare.outputs.version }}","content":"$(cat notification.md | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\\n/\\\\n/g')"\
+' \
+            https://api.notifications.com/v1/email
