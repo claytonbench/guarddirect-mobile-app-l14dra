@@ -1,0 +1,78 @@
+# Kubernetes Horizontal Pod Autoscaler (HPA) for Security Patrol API service
+# This HPA automatically scales the Security Patrol API deployment based on CPU utilization
+# Kubernetes API version: autoscaling/v2 (stable HPA API)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  # Unique name for this HPA resource
+  name: security-patrol-api-hpa
+  # Kubernetes namespace where this resource will be deployed
+  namespace: security-patrol
+  # Labels for resource identification and selection
+  labels:
+    app: security-patrol
+    component: api
+  # Additional metadata annotations
+  annotations:
+    kubernetes.io/description: "Horizontal Pod Autoscaler for Security Patrol API"
+    # Specify how CPU metrics should be aggregated across pods
+    metric-config.pods.prometheus.io/cpu-aggregation: "average"
+spec:
+  # Reference to the target deployment that will be scaled
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: security-patrol-api
+  # Minimum number of replicas to maintain for high availability
+  # Ensures at least 2 pods are running at all times for redundancy
+  minReplicas: 2
+  # Maximum number of replicas to scale up to under high load
+  # Limits scaling to 10 pods to prevent excessive resource consumption
+  maxReplicas: 10
+  # Metrics used to determine scaling decisions
+  metrics:
+  - type: Resource  # Resource-based metric (CPU, memory)
+    resource:
+      name: cpu     # CPU utilization is the scaling metric
+      target:
+        type: Utilization  # Based on percentage of CPU request
+        # Target 60% CPU utilization across pods
+        # Will scale up if average utilization exceeds 60%
+        # Will scale down if average utilization drops below 60%
+        averageUtilization: 60
+  # Scaling behavior configuration for more controlled scaling
+  behavior:
+    # Configuration for scaling up (adding pods)
+    scaleUp:
+      # 60 second window to stabilize metrics before making scaling decisions
+      # Prevents rapid fluctuations in pod count due to brief spikes
+      stabilizationWindowSeconds: 60
+      # Policies that determine how quickly to scale up
+      policies:
+      # Percentage-based scaling: Can double the count of pods every 60 seconds
+      - type: Percent
+        value: 100    # Increase by up to 100% (double)
+        periodSeconds: 60
+      # Pod-based scaling: Can add up to 2 pods every 60 seconds
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      # Use the more aggressive of the two policies
+      selectPolicy: Max
+    # Configuration for scaling down (removing pods)
+    scaleDown:
+      # Longer 5-minute window to stabilize before scaling down
+      # Prevents premature pod removal due to brief drops in load
+      stabilizationWindowSeconds: 300
+      # Policies that determine how quickly to scale down
+      policies:
+      # Percentage-based scaling: Can remove up to 25% of pods every 60 seconds
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+      # Pod-based scaling: Can remove at most 1 pod every 60 seconds
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+      # Use the more aggressive of the two policies
+      selectPolicy: Max
