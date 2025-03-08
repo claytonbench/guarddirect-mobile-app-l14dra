@@ -1,0 +1,72 @@
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa]rtifacts/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+*.userprefs
+
+# Visual Studio files
+.vs/
+launchSettings.json
+
+# Rider files
+.idea/
+*.sln.iml
+
+# VS Code files
+.vscode/
+
+# NuGet packages
+[Pp]ackages/
+*.nupkg
+*.snupkg
+
+# Test Results
+[Tt]est[Rr]esults/
+[Cc]overage/
+*.coverage
+coverage.json
+coverage.xml
+
+# Database files
+*.dbmdl
+*.jfm
+*.mdf
+*.ldf
+*.bak
+
+# Logs
+[Ll]og/
+[Ll]ogs/
+
+# Sensitive configuration
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+appsettings.*.json
+*.pfx
+*.key
+*.env
+.env.*
+
+# Docker development
+docker-compose.override.yml
+
+# Storage
+storage/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
