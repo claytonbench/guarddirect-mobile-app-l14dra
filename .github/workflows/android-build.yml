@@ -1,0 +1,226 @@
+name: Android Build and Test
+
+# Workflow triggers
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/android/**'
+      - '.github/workflows/android-build.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/android/**'
+  workflow_dispatch:
+    description: 'Manually trigger Android build pipeline'
+
+# Environment variables used throughout the workflow
+env:
+  DOTNET_VERSION: '8.0.x'
+  JAVA_VERSION: '17'
+  BUILD_CONFIGURATION: 'Release'
+  CODE_COVERAGE_THRESHOLD: '80'
+
+jobs:
+  # Build the Android application
+  build:
+    name: Build Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore src/android/SecurityPatrol.sln
+
+      - name: Build Android solution
+        run: dotnet build src/android/SecurityPatrol.sln --configuration ${{ env.BUILD_CONFIGURATION }} --no-restore
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-build
+          path: src/android/SecurityPatrol/bin/${{ env.BUILD_CONFIGURATION }}/net8.0-android/android-arm64/publish/
+          retention-days: 7
+
+  # Run tests and verify code coverage
+  test:
+    name: Test Android
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Ensure bc is available for floating-point calculations
+      - name: Install bc for calculations
+        run: sudo apt-get install -y bc
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: android-build
+          path: android-build
+
+      # Run unit tests with code coverage
+      - name: Run unit tests with coverage
+        run: |
+          dotnet test src/android/SecurityPatrol.UnitTests/SecurityPatrol.UnitTests.csproj \
+            --configuration ${{ env.BUILD_CONFIGURATION }} \
+            --collect:"XPlat Code Coverage" \
+            --results-directory TestResults/UnitTests
+
+      # Run integration tests with code coverage
+      - name: Run integration tests with coverage
+        run: |
+          dotnet test src/android/SecurityPatrol.IntegrationTests/SecurityPatrol.IntegrationTests.csproj \
+            --configuration ${{ env.BUILD_CONFIGURATION }} \
+            --collect:"XPlat Code Coverage" \
+            --results-directory TestResults/IntegrationTests
+
+      # Generate a combined coverage report
+      - name: Generate coverage report
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          reportgenerator \
+            -reports:TestResults/**/coverage.cobertura.xml \
+            -targetdir:CodeCoverage \
+            -reporttypes:HtmlInline_AzurePipelines;Cobertura
+
+      # Verify code coverage meets the threshold
+      - name: Verify coverage threshold
+        run: |
+          # Find the first coverage report
+          COVERAGE_FILE=$(find TestResults -name coverage.cobertura.xml | head -1)
+          
+          if [ ! -f "$COVERAGE_FILE" ]; then
+            echo "Error: No coverage file found"
+            exit 1
+          fi
+          
+          # Extract line rate and calculate percentage
+          LINE_RATE=$(grep -o 'line-rate="[0-9.]*"' "$COVERAGE_FILE" | head -1 | grep -o '[0-9.]*')
+          
+          if [ -z "$LINE_RATE" ]; then
+            echo "Error: Could not extract coverage rate from report"
+            exit 1
+          fi
+          
+          COVERAGE_PERCENTAGE=$(echo "$LINE_RATE * 100" | bc -l)
+          FORMATTED_COVERAGE=$(printf "%.2f" $COVERAGE_PERCENTAGE)
+          echo "Code coverage: $FORMATTED_COVERAGE%"
+          
+          # Compare with threshold
+          THRESHOLD_MET=$(echo "$COVERAGE_PERCENTAGE >= ${{ env.CODE_COVERAGE_THRESHOLD }}" | bc -l)
+          
+          if [ "$THRESHOLD_MET" -eq 1 ]; then
+            echo "Code coverage meets threshold requirements"
+          else
+            echo "Error: Code coverage below threshold. Expected ${{ env.CODE_COVERAGE_THRESHOLD }}%, got $FORMATTED_COVERAGE%"
+            exit 1
+          fi
+
+      # Upload test results as artifacts
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: TestResults
+          retention-days: 7
+
+      # Upload code coverage report as artifacts
+      - name: Upload code coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage
+          path: CodeCoverage
+          retention-days: 7
+
+  # Sign the APK for distribution (only on push to main/develop)
+  sign:
+    name: Sign APK
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # Download the build artifacts from the build job
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: android-build
+          path: unsigned-apk
+
+      # Decode the base64-encoded signing key
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.ANDROID_SIGNING_KEY_BASE64 }}" | base64 --decode > android-signing-key.jks
+          mkdir -p signed-apk
+
+      # Sign the APK using jarsigner
+      - name: Sign APK
+        run: |
+          for apk in $(find unsigned-apk -name "*.apk"); do
+            echo "Signing APK: $apk"
+            jarsigner -verbose \
+              -keystore android-signing-key.jks \
+              -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+              -keypass "${{ secrets.ANDROID_KEY_PASSWORD }}" \
+              -signedjar "signed-apk/$(basename $apk)" \
+              "$apk" \
+              "${{ secrets.ANDROID_KEY_ALIAS }}"
+          done
+
+      # Verify the signature to ensure the APK was signed properly
+      - name: Verify signature
+        run: |
+          for apk in signed-apk/*.apk; do
+            echo "Verifying signature for: $apk"
+            jarsigner -verify -verbose -certs "$apk"
+          done
+
+      # Upload the signed APK as an artifact
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: signed-apk
+          path: signed-apk/*.apk
+          retention-days: 30
