@@ -1,0 +1,95 @@
+version: 2
+updates:
+  # Configuration for NuGet dependencies in the Android app
+  - package-ecosystem: "nuget"
+    directory: "/src/android/SecurityPatrol/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "android"
+    assignees:
+      - "security-team"
+    reviewers:
+      - "mobile-team-lead"
+    ignore:
+      - dependency-name: "Microsoft.Maui.*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      maui-dependencies:
+        patterns:
+          - "Microsoft.Maui.*"
+          - "Microsoft.Extensions.*"
+      community-toolkit:
+        patterns:
+          - "CommunityToolkit.*"
+
+  # Configuration for NuGet dependencies in the backend services
+  - package-ecosystem: "nuget"
+    directory: "/src/backend/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "backend"
+    assignees:
+      - "security-team"
+    reviewers:
+      - "backend-team-lead"
+    ignore:
+      - dependency-name: "Microsoft.EntityFrameworkCore.*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      ef-core-dependencies:
+        patterns:
+          - "Microsoft.EntityFrameworkCore.*"
+      aspnetcore-dependencies:
+        patterns:
+          - "Microsoft.AspNetCore.*"
+      serilog-dependencies:
+        patterns:
+          - "Serilog.*"
+
+  # Configuration for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci-cd"
+    assignees:
+      - "devops-team"
+    reviewers:
+      - "devops-lead"
+
+  # Configuration for Docker
+  - package-ecosystem: "docker"
+    directory: "/src/backend/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    assignees:
+      - "devops-team"
+    reviewers:
+      - "devops-lead"
+
+registries:
+  nuget-feed:
+    type: nuget-feed
+    url: https://api.nuget.org/v3/index.json
+    token: ${{secrets.NUGET_AUTH_TOKEN}}
+    replaces-base: true
+
+commit-message:
+  prefix: "deps"
+  prefix-development: "dev-deps"
+  include: "scope"
